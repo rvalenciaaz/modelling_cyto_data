@@ -41,9 +41,7 @@ for col in numerical_data.columns:
     # Avoid division by zero: if mean is 0, set CV to NaN.
     cv = std_val / mean_val if mean_val != 0 else np.nan
     mad = median_abs_deviation(numerical_data[col].values)
-    # Extract the trailing number (subscript) from the column name.
-    # For example, if col is 'feature_12', this will extract '12'.
-    #match = re.search(r'(\d+)$', col)
+
     subscript = col #match.group(1) if match else col
 
     cv_results[subscript] = [subscript,cv,mad]
@@ -54,9 +52,5 @@ cv_df = pd.DataFrame(list(cv_results.values()),
 
 cv_2=cv_df.loc[cv_df["MAD"]<=5].copy()
 
-#print(cv_df)
-#print(cv_2)
-
-#com_after_low=combined_df.drop(cv_2["Feature"].tolist(),axis=1).copy()
 com_after_low=combined_df[cv_2["Feature"].tolist()].copy()
 print(com_after_low)
