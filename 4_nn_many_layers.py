@@ -26,14 +26,14 @@ torch.manual_seed(42)
 # ---------------------------------------------------------
 # 1. READING & SUBSAMPLING CSV FILES
 # ---------------------------------------------------------
-print("Reading CSV files ...")
+print("Reading CSV files and subsampling...")
 csv_files = glob.glob("species*.csv")  # Adjust pattern to your needs
 df_list = []
 
 for file_path in csv_files:
     temp_df = pd.read_csv(file_path)
     # Optional subsample
-    # temp_df = temp_df.sample(n=min(len(temp_df), 10_000), random_state=42)
+    temp_df = temp_df.sample(n=min(len(temp_df), 10_000), random_state=42)
     label = file_path.split('.')[0]  # e.g. "species1.csv" -> "species1"
     temp_df['Label'] = label
     df_list.append(temp_df)
