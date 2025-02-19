@@ -221,7 +221,7 @@ param_grid_nn = {
     "num_layers":    [1, 2, 3],   # Test various depths
     "learning_rate": [1e-3, 1e-4],
     "batch_size":    [64, 128],
-    "epochs":        [10, 20]     # fewer epochs for grid search
+    "epochs":        [30]     # fewer epochs for grid search
 }
 
 grid_nn = GridSearchCV(
@@ -244,7 +244,7 @@ print(f"Best NN Parameters: {grid_nn.best_params_}")
 print("\nRe-fitting best NN model on entire training set with 50 epochs...")
 
 best_nn = grid_nn.best_estimator_
-best_nn.epochs = 50
+best_nn.epochs = 100
 best_nn.verbose = True
 best_nn.fit(X_train_scaled, y_train)
 
