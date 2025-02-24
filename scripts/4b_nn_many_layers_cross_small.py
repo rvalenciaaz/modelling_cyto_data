@@ -38,7 +38,7 @@ def log_message(message):
 # 1. READING & SUBSAMPLING CSV FILES
 # ---------------------------------------------------------
 log_message("Reading CSV files and subsampling...")
-csv_files = glob.glob("species*.csv")  # Adjust pattern as needed
+csv_files = glob.glob("species*.csv")  # Will get a list of species*.csv filenames
 df_list = []
 for file_path in csv_files:
     temp_df = pd.read_csv(file_path)
