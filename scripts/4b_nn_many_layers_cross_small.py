@@ -65,7 +65,7 @@ for col in numerical_data.columns:
     cv_results[col] = [col, cv, mad]
 cv_df = pd.DataFrame(cv_results.values(), columns=['Feature', 'CV', 'MAD'])
 MAD_THRESHOLD = 5
-features_to_keep = cv_df.loc[cv_df["MAD"] >= MAD_THRESHOLD, "Feature"].tolist()
+features_to_keep = cv_df.loc[cv_df["MAD"] >= MAD_THRESHOLD, "Feature"].tolist() #filtering by mad (deviation unsensitive to outliers)
 cols_to_keep = features_to_keep + ["Label"]
 final_df = combined_df[cols_to_keep].copy()
 log_message(f"Number of features kept after MAD filtering: {len(features_to_keep)}")
@@ -86,6 +86,7 @@ log_message(f"Training set shape: {X_train.shape}, Test set shape: {X_test.shape
 # ---------------------------------------------------------
 # 4. DEFINE THE CONFIGURABLE NN MODEL
 # ---------------------------------------------------------
+#base net
 class ConfigurableNN(nn.Module):
     """
     A feedforward neural network with a variable number of hidden layers.
@@ -118,7 +119,7 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
         self.num_layers = num_layers
         self.verbose = verbose
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # To be set later
+        # to be set later
         self.input_dim_ = None
         self.output_dim_ = None
         self.model_ = None
@@ -131,17 +132,19 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
         self.output_dim_ = len(np.unique(y))
         self.classes_ = np.unique(y)
         # Build the model
+        #it can take the parameter values
         self.model_ = ConfigurableNN(
             input_dim=self.input_dim_,
             hidden_size=self.hidden_size,
             output_dim=self.output_dim_,
             num_layers=self.num_layers
         ).to(self.device)
-        # Print the number of trainable parameters for this model
+        # print the number of trainable parameters for this model
         param_count = sum(p.numel() for p in self.model_.parameters() if p.requires_grad)
         print(f"Model with {self.num_layers} hidden layers and hidden_size {self.hidden_size} "
               f"has {param_count} trainable parameters.")
         criterion = nn.CrossEntropyLoss()
+        #perhaps trying other optimiser?
         optimizer = optim.Adam(self.model_.parameters(), lr=self.learning_rate)
         X_torch = torch.from_numpy(X).float().to(self.device)
         y_torch = torch.from_numpy(y).long().to(self.device)
@@ -149,6 +152,7 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         self.train_losses_ = []
         self.val_losses_ = []
+        # criterion is loss function
         for epoch in range(self.epochs):
             self.model_.train()
             epoch_loss = 0.0
@@ -204,20 +208,21 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
 # 6. SET UP PIPELINE & GRID SEARCH USING THE SAME NN (WITH VAL)
 # ---------------------------------------------------------
 log_message("=== Building Pipeline & Grid Search (using NN with Val) ===")
+#scikit-learn pipeline
 pipeline = Pipeline([
     ('scaler', StandardScaler()),
     # Activate verbose mode here:
     ('nn', PyTorchNNClassifierWithVal(verbose=True))
 ])
 param_grid = {
-    'nn__hidden_size':   [16,32],
-    'nn__num_layers':    [1, 2, 3],
-    'nn__learning_rate': [1e-3, 1e-4],
-    'nn__batch_size':    [16,32],
+    'nn__hidden_size':   [16,32], #small hidden size so the network is not too big
+    'nn__num_layers':    [1, 2, 3], #we might try more depth?
+    'nn__learning_rate': [1e-3, 1e-4],  #standard value
+    'nn__batch_size':    [16,32],  #sizes to process data for optimisation, higher is faster
     'nn__epochs':        [30]  # Fewer epochs during grid search
 }
 grid_nn = GridSearchCV(
-    estimator=pipeline,
+    estimator=pipeline, #pipeline here
     param_grid=param_grid,
     cv=3,
     scoring='accuracy',
@@ -235,6 +240,7 @@ log_message(f"Best NN Pipeline Parameters: {best_params}")
 # 7. FINAL REFIT ON TRAINING SET WITH MORE EPOCHS
 # ---------------------------------------------------------
 log_message("Re-fitting best pipeline on entire training set with 100 epochs...")
+#best_parameters
 best_pipeline = grid_nn.best_estimator_
 best_pipeline.set_params(nn__epochs=100)
 best_pipeline.fit(X_train, y_train)
@@ -252,6 +258,7 @@ fold_idx = 1
 for train_index, val_index in kf.split(X_train, y_train):
     X_tr_fold, X_val_fold = X_train[train_index], X_train[val_index]
     y_tr_fold, y_val_fold = y_train[train_index], y_train[val_index]
+    #it can be also done with pipeline
     scaler_fold = StandardScaler()
     X_tr_fold_scaled = scaler_fold.fit_transform(X_tr_fold)
     X_val_fold_scaled = scaler_fold.transform(X_val_fold)
