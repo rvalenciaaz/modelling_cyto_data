@@ -42,6 +42,7 @@ csv_files = glob.glob("species*.csv")  # Adjust pattern as needed
 df_list = []
 for file_path in csv_files:
     temp_df = pd.read_csv(file_path)
+    #subsampling is optional here
     #temp_df = temp_df.sample(n=min(len(temp_df), 10_000), random_state=42)
     label = file_path.split('.')[0]  # e.g. "species1.csv" -> "species1"
     temp_df['Label'] = label
