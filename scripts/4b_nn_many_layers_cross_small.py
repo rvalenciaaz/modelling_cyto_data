@@ -20,7 +20,9 @@ from sklearn.pipeline import Pipeline
 # For plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
+import scienceplots
 
+plt.style.use(['science','nature'])
 # Fix seeds for reproducibility
 np.random.seed(42)
 torch.manual_seed(42)
