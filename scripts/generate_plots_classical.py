@@ -8,7 +8,9 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from scipy.stats import median_abs_deviation
+import scienceplots
 
+plt.style.use(['science','ieee'])
 # ------------------------------
 # 1. LOAD SAVED ARTIFACTS
 # ------------------------------

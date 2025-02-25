@@ -232,7 +232,7 @@ log_message(f"Best NN Pipeline Parameters: {best_params}")
 # ---------------------------------------------------------
 log_message("Re-fitting best pipeline on entire training set with 100 epochs...")
 best_pipeline = grid_nn.best_estimator_
-best_pipeline.set_params(nn__epochs=100)
+best_pipeline.set_params(nn__epochs=50)
 best_pipeline.fit(X_train, y_train)
 
 # ---------------------------------------------------------

@@ -20,7 +20,9 @@ import joblib
 # For plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
+import scienceplots
 
+plt.style.use(['science','nature'])
 # ====================================================
 # 1. READING & SUBSAMPLING CSV FILES
 # ====================================================

@@ -3,7 +3,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import ConfusionMatrixDisplay
 import json
+import scienceplots
 
+plt.style.use(['science','nature'])
 # ---------------------------
 # 1. Load CV Plot Data
 # ---------------------------
