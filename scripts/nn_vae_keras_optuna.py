@@ -147,11 +147,11 @@ def create_vae_model(input_dim, hidden_size, latent_dim, num_layers):
 def objective(trial):
     # Hyperparameters to optimize
     hidden_size = trial.suggest_categorical("hidden_size", [16, 32])
-    latent_dim = trial.suggest_categorical("latent_dim", [2, 5])
+    latent_dim = trial.suggest_categorical("latent_dim", [5, 30])
     num_layers = trial.suggest_categorical("num_layers", [1, 2])
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
     batch_size = trial.suggest_categorical("batch_size", [16, 32])
-    epochs = trial.suggest_int("epochs", 30, 30)  # Fixed 30 epochs for optuna optimization
+    epochs = trial.suggest_int("epochs", 20, 20)  # Fixed 20 epochs for optuna optimization
 
     input_dim = X_train_scaled.shape[1]
     vae, _, _ = create_vae_model(input_dim, hidden_size, latent_dim, num_layers)
