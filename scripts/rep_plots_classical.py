@@ -2,19 +2,13 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import scienceplots
 
-# Folder with saved CSV files
-data_folder = "output_classical_100k"
+plt.style.use(["science","nature"])
+# Set the folder where the saved files reside
+output_folder = "output_classical_100k"
 
-# Folder to save the replicated plots
-output_folder = "replication_plots"
-if not os.path.exists(output_folder):
-    os.makedirs(output_folder)
-
-def data_file_path(filename):
-    return os.path.join(data_folder, filename)
-
-def output_file_path(filename):
+def file_path(filename):
     return os.path.join(output_folder, filename)
 
 def plot_confusion_matrix(csv_file, title, save_path, fmt="d",
@@ -60,52 +54,52 @@ def plot_feature_importance(csv_file, title_top10, title_top20,
 # --- Replicate Confusion Matrix Plots ---
 
 # Random Forest Confusion Matrices
-plot_confusion_matrix(data_file_path("confusion_matrix_rf_data.csv"),
+plot_confusion_matrix(file_path("confusion_matrix_rf_data.csv"),
                       "Confusion Matrix (Random Forest)",
-                      output_file_path("replicated_confusion_matrix_rf.png"),
+                      file_path("replicated_confusion_matrix_rf.png"),
                       fmt="d")
 
-plot_confusion_matrix(data_file_path("confusion_matrix_rf_normalized_data.csv"),
+plot_confusion_matrix(file_path("confusion_matrix_rf_normalized_data.csv"),
                       "Normalized Confusion Matrix (Random Forest)",
-                      output_file_path("replicated_confusion_matrix_rf_normalized.png"),
+                      file_path("replicated_confusion_matrix_rf_normalized.png"),
                       fmt=".2f")
 
 # Logistic Regression Confusion Matrices
-plot_confusion_matrix(data_file_path("confusion_matrix_lr_data.csv"),
+plot_confusion_matrix(file_path("confusion_matrix_lr_data.csv"),
                       "Confusion Matrix (Logistic Regression)",
-                      output_file_path("replicated_confusion_matrix_lr.png"),
+                      file_path("replicated_confusion_matrix_lr.png"),
                       fmt="d")
 
-plot_confusion_matrix(data_file_path("confusion_matrix_lr_normalized_data.csv"),
+plot_confusion_matrix(file_path("confusion_matrix_lr_normalized_data.csv"),
                       "Normalized Confusion Matrix (Logistic Regression)",
-                      output_file_path("replicated_confusion_matrix_lr_normalized.png"),
+                      file_path("replicated_confusion_matrix_lr_normalized.png"),
                       fmt=".2f")
 
 # XGBoost Confusion Matrices
-plot_confusion_matrix(data_file_path("confusion_matrix_xgb_data.csv"),
+plot_confusion_matrix(file_path("confusion_matrix_xgb_data.csv"),
                       "Confusion Matrix (XGBoost)",
-                      output_file_path("replicated_confusion_matrix_xgb.png"),
+                      file_path("replicated_confusion_matrix_xgb.png"),
                       fmt="d")
 
-plot_confusion_matrix(data_file_path("confusion_matrix_xgb_normalized_data.csv"),
+plot_confusion_matrix(file_path("confusion_matrix_xgb_normalized_data.csv"),
                       "Normalized Confusion Matrix (XGBoost)",
-                      output_file_path("replicated_confusion_matrix_xgb_normalized.png"),
+                      file_path("replicated_confusion_matrix_xgb_normalized.png"),
                       fmt=".2f")
 
 # --- Replicate Feature Importance Plots ---
 
 # Random Forest Feature Importances
-plot_feature_importance(data_file_path("feature_importances_rf_full.csv"),
+plot_feature_importance(file_path("feature_importances_rf_full.csv"),
                         "Random Forest Feature Importances (Top 10)",
                         "Random Forest Feature Importances (Top 20)",
-                        output_file_path("replicated_feature_importances_rf_top10.png"),
-                        output_file_path("replicated_feature_importances_rf_top20.png"))
+                        file_path("replicated_feature_importances_rf_top10.png"),
+                        file_path("replicated_feature_importances_rf_top20.png"))
 
 # XGBoost Feature Importances
-plot_feature_importance(data_file_path("feature_importances_xgb_full.csv"),
+plot_feature_importance(file_path("feature_importances_xgb_full.csv"),
                         "XGBoost Feature Importances (Top 10)",
                         "XGBoost Feature Importances (Top 20)",
-                        output_file_path("replicated_feature_importances_xgb_top10.png"),
-                        output_file_path("replicated_feature_importances_xgb_top20.png"))
+                        file_path("replicated_feature_importances_xgb_top10.png"),
+                        file_path("replicated_feature_importances_xgb_top20.png"))
 
-print("All plots have been replicated and saved to the folder 'replication_plots'.")
+print("All plots have been replicated and saved successfully in the output folder.")
