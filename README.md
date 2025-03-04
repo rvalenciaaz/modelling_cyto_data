@@ -3,7 +3,9 @@
 ```markdown
 # Classification of flow cytometry events into bacterial species using classical ML models and neural networks
 
-This repository contains a complete pipeline for . Additionally, it can train a neural network classifier on the same data using a  pytorch implementation. The project includes data preprocessing, feature filtering (using the Median Absolute Deviation), hyperparameter tuning via grid search, 5-fold cross-validation, model evaluation, and saving necessary artifacts for plot reproduction. Additional scripts are given for hyperparameter optimisation of the neural network model usiing optuna
+This repository contains a complete pipeline for classification of flow cytometry events into bacterial species using classical ML models, such as Logistic Regression, Support Vector Machine, Random Forest and xgboost (Boosted trees). Additionally, it can train a neural network classifier on the same data using a pytorch implementation.
+
+The project includes data preprocessing, feature filtering (using the Median Absolute Deviation), hyperparameter tuning via grid search, 5-fold cross-validation, model evaluation, and saving necessary artifacts for plot reproduction. Additional scripts are given for hyperparameter optimisation of the neural network model using optuna.
 
 ## Features
 
