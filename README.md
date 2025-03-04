@@ -1,9 +1,9 @@
 # modelling_cyto_data
 
 ```markdown
-# Species Classification using Neural Networks
+# Classification of flow cytometry events into bacterial species using classical ML models and neural networks
 
-This repository contains a complete pipeline for training a neural network classifier on species data using Keras and scikit-learn. The project includes data preprocessing, feature filtering (using the Median Absolute Deviation), hyperparameter tuning via grid search, 5-fold cross-validation, model evaluation, and saving necessary artifacts for plot reproduction.
+This repository contains a complete pipeline for . Additionally, it can train a neural network classifier on the same data using a  pytorch implementation. The project includes data preprocessing, feature filtering (using the Median Absolute Deviation), hyperparameter tuning via grid search, 5-fold cross-validation, model evaluation, and saving necessary artifacts for plot reproduction. Additional scripts are given for hyperparameter optimisation of the neural network model usiing optuna
 
 ## Features
 
