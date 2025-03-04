@@ -31,9 +31,9 @@ The project includes data preprocessing, feature filtering (using the Median Abs
 
 Install the required packages via pip:
 
-```bash
+
 pip install numpy pandas scipy scikit-learn tensorflow matplotlib seaborn scienceplots
-```
+
 
 ## Project Structure
 
