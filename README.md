@@ -11,7 +11,9 @@ The pipeline includes:
 - Feature selection using Median Absolute Deviation (MAD)
 - Classical ML models: Logistic Regression, SVM, Random Forest, and XGBoost
 - Neural Network model implemented with PyTorch
-- Hyperparameter optimization with GridSearchCV (classical ML) and Optuna (Neural Networks)
+- Hyperparameter optimization with Optuna
+- Generation of embeddings using VAE
+- Confidence in classifier predictions via calibration and Bayesian neural netowrks (BNN)
 - 5-fold cross-validation
 - Evaluation and artifact saving for reproducibility
 - Plot reproduction scripts
@@ -23,11 +25,11 @@ The pipeline includes:
 - **Data Ingestion:** Combines multiple CSV files (`species1.csv`, `species2.csv`, etc.) into one dataset.
 - **Feature Filtering:** Filters numerical features using MAD.
 - **Model Training:** Configurable PyTorch neural network with customizable layers.
-- **Hyperparameter Tuning:** Grid search for classical ML models, Optuna for neural networks.
+- **Hyperparameter Tuning:** Optuna hyperparameter optimization for both classical models and neural networks.
 - **Cross-Validation:** Estimates uncertainty with 5-fold cross-validation.
 - **Artifact Saving:** Saves loss curves, confusion matrices, model weights, and logs.
 - **Plot Reproduction:** Standalone scripts to reproduce loss and confusion matrix plots.
-
+  
 ---
 
 ## Requirements
