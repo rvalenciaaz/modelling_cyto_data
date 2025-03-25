@@ -153,13 +153,13 @@ Load saved model for predictions:
 
 ---
 
-### Results
+## Results
 
-## Classification with dataset of 9 species and 100k events per specie.
+### Classification with dataset of 9 species and 100k events per specie.
 
 
 
-## Classification with dataset of 9 species and 1m* events per specie.
+### Classification with dataset of 9 species and 1m* events per specie.
 
 ---
 ## License
