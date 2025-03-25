@@ -88,7 +88,7 @@ There are two ways of preparing the data:
 
 2) The events can be exported as channel values in csv format using FlowJo. Place CSV files with the following format (`species1.csv`, `species2.csv`, etc.) in the project directory.
 
-### 2. Train the Model
+### 2a. Train the Model (main_scripts)
 ```bash
 python main.py
 ```
@@ -108,8 +108,29 @@ Artifacts generated:
 - Plots (`cv_all_folds_loss.png`, `cv_mean_confidence_loss.png`, `confusion_matrix_nn.png`)
 - Log file (`log_steps.json`)
 
-### 3. Reproduce Plots
-To recreate plots from saved data:
+### 2b. Train the Model (project folder)
+
+```bash
+python main.py
+```
+
+**This script:**
+- Preprocesses data and selects features
+- Tunes hyperparameters (GridSearchCV, Optuna)
+- Performs cross-validation
+- Saves artifacts (loss curves, confusion matrix, models, logs)
+- Generates and saves plots
+
+Artifacts generated:
+- `cv_plot_data.npz`
+- `confusion_matrix.npy`
+- `best_model_state.h5`
+- `best_estimator.h5`
+- Plots (`cv_all_folds_loss.png`, `cv_mean_confidence_loss.png`, `confusion_matrix_nn.png`)
+- Log file (`log_steps.json`)
+
+### 4. Reproduce Plots
+To ensure reproducilTo recreate plots from saved data:
 
 ```bash
 python reproduce_plots.py
@@ -120,30 +141,26 @@ Generated plots:
 - `cv_mean_confidence_loss_reproduced.png`
 - `confusion_matrix_reproduced.png`
 
-### 4. Load Model for Inference
+### 5. Load Model for Inference
 
 Load saved model for predictions:
 
 ```python
-from tensorflow.keras.models import load_model
 
-model = load_model("best_estimator.h5")
-predictions = model.predict(data)
 ```
+
+### 6. Classifier predictions
 
 ---
 
 ## License
 
-Distributed under the MIT License. See [`LICENSE`](LICENSE) for details.
+Distributed under the  License. See [`LICENSE`](LICENSE) for details.
 
 ---
 
 ## Acknowledgements
 
-- [TensorFlow and Keras](https://www.tensorflow.org/)
-- [scikit-learn](https://scikit-learn.org/)
-- [SciencePlots](https://github.com/garrettj403/SciencePlots)
 
 ---
 
