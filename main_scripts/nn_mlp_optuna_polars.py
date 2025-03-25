@@ -1,4 +1,3 @@
-# train_and_save_scaler.py
 import glob
 import os
 import polars as pl
