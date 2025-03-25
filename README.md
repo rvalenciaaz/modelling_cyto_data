@@ -50,10 +50,10 @@ The pipeline includes:
 | [Pyro](https://pyro.ai/)                             | `pip install pyro-ppl`                      |
 | [SciencePlots](https://github.com/garrettj403/SciencePlots) | `pip install SciencePlots`                  |
 
-### Conda Environment (optional)
+### Conda Environment (optional) (other packages via pip inside of the environment)
 
 ```bash
-$MAMBA_EXEC create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars scikit-learn
+mamba create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars scikit-learn
 ```
 
 ---
