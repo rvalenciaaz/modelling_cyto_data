@@ -1,3 +1,4 @@
+# train_and_save_scaler.py
 import glob
 import os
 import polars as pl
@@ -43,7 +44,7 @@ def log_message(message):
 # ---------------------------------------------------------
 log_message("Reading CSV files and subsampling with Polars...")
 
-csv_files = glob.glob("species*.csv")  # Will get a list of species*.csv filenames
+csv_files = glob.glob("species*.csv")  # e.g. "species1.csv", "species2.csv", etc.
 df_list = []
 
 for file_path in csv_files:
@@ -57,7 +58,7 @@ for file_path in csv_files:
 
 combined_df = pl.concat(df_list)
 
-# Remove the "species" prefix if your filenames contain that
+# Remove the prefix "species" from the label if needed
 combined_df = combined_df.with_columns(
     pl.col("Label").str.replace("species", "")
 )
@@ -243,11 +244,11 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
 # ---------------------------------------------------------
 def objective(trial):
     hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
-    num_layers  = trial.suggest_int('num_layers', 3, 30)
+    num_layers  = trial.suggest_int('num_layers', 3, 10)
     dropout     = trial.suggest_float('dropout', 0.0, 0.5, step=0.1)
     learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-3, log=True)
     batch_size  = trial.suggest_categorical('batch_size', [64, 128, 256])
-    epochs      = 30  # fewer epochs for quick search
+    epochs      = 10  # fewer epochs for quick search
 
     kf = KFold(n_splits=3, shuffle=True, random_state=42)
     accuracy_scores = []
@@ -312,6 +313,13 @@ label_encoder_path = os.path.join(OUTPUT_DIR, "label_encoder.joblib")
 joblib.dump(label_encoder, label_encoder_path)
 log_message(f"Saved fitted label encoder to '{label_encoder_path}'.")
 
+# IMPORTANT: Save the final list of features used
+features_used_path = os.path.join(OUTPUT_DIR, "features_used.json")
+# Remember, 'features_to_keep' was the final numeric columns that passed the MAD threshold
+with open(features_used_path, "w") as f:
+    json.dump(features_to_keep, f, indent=2)
+log_message(f"Saved feature list to '{features_used_path}'.")
+
 # Build & train final model
 final_clf = PyTorchNNClassifierWithVal(**best_params_for_final)
 final_clf.fit(X_train_scaled, y_train)
@@ -322,7 +330,6 @@ y_pred = final_clf.predict(X_test_scaled)
 test_acc = accuracy_score(y_test, y_pred)
 log_message(f"Final Test Accuracy: {test_acc:.4f}")
 
-# Save confusion matrix & classification report
 cm = confusion_matrix(y_test, y_pred)
 cm_path = os.path.join(OUTPUT_DIR, "confusion_matrix.npy")
 np.save(cm_path, cm)
@@ -340,7 +347,6 @@ class_report = classification_report(y_test, y_pred)
 log_message("\nClassification Report:")
 log_message(class_report)
 
-# Save metrics + best params
 metrics_dict = {
     "test_accuracy": float(test_acc),
     "classification_report": class_report,
