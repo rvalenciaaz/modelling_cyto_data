@@ -243,11 +243,11 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
 # ---------------------------------------------------------
 def objective(trial):
     hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
-    num_layers  = trial.suggest_int('num_layers', 3, 10)
+    num_layers  = trial.suggest_int('num_layers', 3, 30)
     dropout     = trial.suggest_float('dropout', 0.0, 0.5, step=0.1)
     learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-3, log=True)
     batch_size  = trial.suggest_categorical('batch_size', [64, 128, 256])
-    epochs      = 10  # fewer epochs for quick search
+    epochs      = 30  # fewer epochs for quick search
 
     kf = KFold(n_splits=3, shuffle=True, random_state=42)
     accuracy_scores = []
@@ -283,7 +283,7 @@ def objective(trial):
 # ---------------------------------------------------------
 log_message("=== Starting Optuna hyperparameter optimization ===")
 study = optuna.create_study(direction="maximize")
-study.optimize(objective, n_trials=5)  # set to your desired # of trials
+study.optimize(objective, n_trials=30)  # set to your desired # of trials
 
 best_params = study.best_params
 best_score = study.best_value
@@ -295,7 +295,7 @@ log_message(f"Optuna best CV accuracy: {best_score:.4f}")
 # ---------------------------------------------------------
 log_message("Re-fitting with best hyperparameters on entire training set (30 epochs)...")
 best_params_for_final = best_params.copy()
-best_params_for_final["epochs"] = 30
+best_params_for_final["epochs"] = 50
 best_params_for_final["verbose"] = True
 
 # Create & fit the final scaler
