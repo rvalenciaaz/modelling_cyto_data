@@ -72,7 +72,9 @@ mamba create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars
 ## Usage
 
 ### 1. Prepare Data
-Place CSV files (`species1.csv`, `species2.csv`, etc.) in the project directory. Ensure numeric features and species labels are present.
+There are two ways of preparing the data:
+
+2) The events can be exported as channel values in csv format using FlowJo. Place CSV files with the following format (`species1.csv`, `species2.csv`, etc.) in the project directory.
 
 ### 2. Train the Model
 ```bash
