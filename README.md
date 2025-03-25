@@ -67,9 +67,17 @@ mamba create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars
 
 ## Project Structure
 
-- `main.py`: Pipeline for training models, saving artifacts, and logging.
-- `reproduce_plots.py`: Reproduces plots from saved artifacts.
-- `README.md`: Project documentation.
+There are several scripts that execute different pipelines, these are located in the main_scripts folder:
+
+- ``: Pipeline for
+- ``: Pipeline for
+- ``: Pipeline for
+- ``: Pipeline for
+- ``: Pipeline for
+- ``: Pipeline for
+The scripts take the channel values csv from pure culture run in a format (`species1.csv`, `species2.csv`, ...), as it will be specified later.
+
+In addition, these scripts are consolidated into a project located in the folder ``
 
 ---
 
