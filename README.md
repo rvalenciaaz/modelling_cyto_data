@@ -19,7 +19,7 @@ The project includes data preprocessing, feature filtering (using the Median Abs
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.7+ (tested with Python 3.12)
 - [NumPy](https://numpy.org/)
 - [Pandas](https://pandas.pydata.org/)
 - [SciPy](https://www.scipy.org/)
@@ -29,10 +29,25 @@ The project includes data preprocessing, feature filtering (using the Median Abs
 - [Seaborn](https://seaborn.pydata.org/)
 - [SciencePlots](https://github.com/garrettj403/SciencePlots)
 
-Install the required packages via pip:
+Install the required packages via conda
+```bash
+$MAMBA_EXEC create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars scikit-learn
+```
+or pip (after installing Python):
 
 ```bash
-pip install numpy pandas scipy scikit-learn tensorflow matplotlib seaborn scienceplots
+pip install numpy pandas scipy scikit-learn matplotlib seaborn polars
+```
+Then install xgboost via pip
+
+```bash
+pip install xgboost
+```
+For pytorch and pyro, also install it via pip
+
+```bash
+pip3 install torch torchvision torchaudio
+pip3 install pyro-ppl
 ```
 
 ## Project Structure
