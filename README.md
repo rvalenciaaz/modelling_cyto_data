@@ -49,6 +49,7 @@ The pipeline includes:
 | [PyTorch](https://pytorch.org/)                      | `pip install torch torchvision torchaudio`  |
 | [Pyro](https://pyro.ai/)                             | `pip install pyro-ppl`                      |
 | [SciencePlots](https://github.com/garrettj403/SciencePlots) | `pip install SciencePlots`                  |
+| [Optuna]()                                           | `pip install optuna`                        |
 
 ### Conda Environment (optional) (other packages via pip inside of the environment)
 
