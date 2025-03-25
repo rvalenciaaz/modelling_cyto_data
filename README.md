@@ -48,11 +48,13 @@ The pipeline includes:
 | [Seaborn](https://seaborn.pydata.org/)               | `pip install seaborn`                       |
 | [Polars](https://www.pola.rs/)                       | `pip install polars`                        |
 
-### Conda Environment (optional) (other packages via pip inside of the environment)
+### Conda Environment (optional)
 
 ```bash
 mamba create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars scikit-learn
 ```
+### Additional packages to install via pip
+
 | Library                                              | Installation                                |
 |------------------------------------------------------|---------------------------------------------|
 | [XGBoost](https://xgboost.readthedocs.io/)           | `pip install xgboost`                       |
