@@ -129,7 +129,7 @@ Artifacts generated:
 - Plots (`cv_all_folds_loss.png`, `cv_mean_confidence_loss.png`, `confusion_matrix_nn.png`)
 - Log file (`log_steps.json`)
 
-### 4. Reproduce Plots
+### 3. Reproduce Plots
 To ensure reproducilTo recreate plots from saved data:
 
 ```bash
@@ -141,7 +141,7 @@ Generated plots:
 - `cv_mean_confidence_loss_reproduced.png`
 - `confusion_matrix_reproduced.png`
 
-### 5. Load Model for Inference
+### 4. Load Model for Inference
 
 Load saved model for predictions:
 
@@ -149,7 +149,7 @@ Load saved model for predictions:
 
 ```
 
-### 6. Classifier predictions
+### 5. Classifier predictions
 
 ---
 
