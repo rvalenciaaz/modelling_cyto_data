@@ -12,7 +12,7 @@ The pipeline includes:
 - Classical ML models: Logistic Regression, SVM, Random Forest, and XGBoost
 - Neural Network model implemented with PyTorch
 - Hyperparameter optimization with Optuna
-- Generation of embeddings using VAE
+- Generation of embeddings using VAE and testing the latent space via a classifier
 - Confidence in classifier predictions via calibration and Bayesian neural netowrks (BNN)
 - 5-fold cross-validation
 - Evaluation and artifact saving for reproducibility
