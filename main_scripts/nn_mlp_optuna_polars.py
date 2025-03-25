@@ -1,9 +1,10 @@
 import glob
+import os
 import polars as pl
 import numpy as np
 import json
 import datetime
-import joblib  # to save the scaler & label encoder
+import joblib  # for saving the scaler & label encoder
 
 # PyTorch imports
 import torch
@@ -15,13 +16,14 @@ from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.pipeline import Pipeline
 
 # For plotting
 import matplotlib.pyplot as plt
-
-# Optuna import
 import optuna
+
+# Make the "outputs" folder if it doesn't exist
+OUTPUT_DIR = "outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Fix seeds for reproducibility
 np.random.seed(42)
@@ -55,6 +57,7 @@ for file_path in csv_files:
 
 combined_df = pl.concat(df_list)
 
+# Remove the "species" prefix if your filenames contain that
 combined_df = combined_df.with_columns(
     pl.col("Label").str.replace("species", "")
 )
@@ -112,11 +115,9 @@ log_message("Splitting data into training and test sets...")
 X = final_df.select(pl.all().exclude("Label")).to_numpy()
 y = final_df.select("Label").to_numpy().ravel()
 
-from sklearn.preprocessing import LabelEncoder
 label_encoder = LabelEncoder()
 y_encoded = label_encoder.fit_transform(y)
 
-from sklearn.model_selection import train_test_split
 X_train, X_test, y_train, y_test = train_test_split(
     X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
 )
@@ -141,9 +142,6 @@ class ConfigurableNN(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.metrics import accuracy_score
 
 class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
     def __init__(self, hidden_size=32, learning_rate=1e-3, batch_size=32,
@@ -175,7 +173,6 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
             dropout=self.dropout
         ).to(self.device)
 
-        import torch.optim as optim
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(self.model_.parameters(), lr=self.learning_rate)
 
@@ -246,13 +243,12 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
 # ---------------------------------------------------------
 def objective(trial):
     hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
-    num_layers = trial.suggest_int('num_layers', 3, 10)
-    dropout = trial.suggest_float('dropout', 0.0, 0.5, step=0.1)
+    num_layers  = trial.suggest_int('num_layers', 3, 30)
+    dropout     = trial.suggest_float('dropout', 0.0, 0.5, step=0.1)
     learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-3, log=True)
-    batch_size = trial.suggest_categorical('batch_size', [64, 128, 256])
+    batch_size  = trial.suggest_categorical('batch_size', [64, 128, 256])
+    epochs      = 30  # fewer epochs for quick search
 
-    epochs = 10  # fewer epochs for quicker search
-    from sklearn.model_selection import KFold
     kf = KFold(n_splits=3, shuffle=True, random_state=42)
     accuracy_scores = []
 
@@ -260,7 +256,7 @@ def objective(trial):
         X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
         y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
 
-        # Scale the data within each fold
+        # Scale within this fold
         scaler_fold = StandardScaler()
         X_tr_fold_scaled = scaler_fold.fit_transform(X_tr_fold)
         X_val_fold_scaled = scaler_fold.transform(X_val_fold)
@@ -287,7 +283,7 @@ def objective(trial):
 # ---------------------------------------------------------
 log_message("=== Starting Optuna hyperparameter optimization ===")
 study = optuna.create_study(direction="maximize")
-study.optimize(objective, n_trials=5)  # set to a small number for this example
+study.optimize(objective, n_trials=5)  # set to your desired # of trials
 
 best_params = study.best_params
 best_score = study.best_value
@@ -295,46 +291,49 @@ log_message(f"Optuna best params: {best_params}")
 log_message(f"Optuna best CV accuracy: {best_score:.4f}")
 
 # ---------------------------------------------------------
-# 7. FINAL REFIT
+# 7. FINAL REFIT (WITH A SINGLE SCALER FOR THE WHOLE TRAIN SET)
 # ---------------------------------------------------------
 log_message("Re-fitting with best hyperparameters on entire training set (30 epochs)...")
 best_params_for_final = best_params.copy()
 best_params_for_final["epochs"] = 30
 best_params_for_final["verbose"] = True
 
-# We will build a pipeline with a fitted scaler we can save
+# Create & fit the final scaler
 pipeline_scaler = StandardScaler()
 X_train_scaled = pipeline_scaler.fit_transform(X_train)
 
-# Save the scaler to disk so we can re-use it in the prediction script
-joblib.dump(pipeline_scaler, "scaler.joblib")
-log_message("Saved fitted scaler to 'scaler.joblib'.")
+# Save the scaler to the outputs folder
+scaler_path = os.path.join(OUTPUT_DIR, "scaler.joblib")
+joblib.dump(pipeline_scaler, scaler_path)
+log_message(f"Saved fitted scaler to '{scaler_path}'.")
 
-# Also save the fitted label encoder if you want to decode predictions:
-joblib.dump(label_encoder, "label_encoder.joblib")
-log_message("Saved fitted label encoder to 'label_encoder.joblib'.")
+# Also save the fitted label encoder (if needed for decoding predictions later)
+label_encoder_path = os.path.join(OUTPUT_DIR, "label_encoder.joblib")
+joblib.dump(label_encoder, label_encoder_path)
+log_message(f"Saved fitted label encoder to '{label_encoder_path}'.")
 
 # Build & train final model
 final_clf = PyTorchNNClassifierWithVal(**best_params_for_final)
 final_clf.fit(X_train_scaled, y_train)
 
-# 7.1. Evaluate on Test
+# Evaluate on Test
 X_test_scaled = pipeline_scaler.transform(X_test)
 y_pred = final_clf.predict(X_test_scaled)
 test_acc = accuracy_score(y_test, y_pred)
 log_message(f"Final Test Accuracy: {test_acc:.4f}")
 
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
-
+# Save confusion matrix & classification report
 cm = confusion_matrix(y_test, y_pred)
-np.save("confusion_matrix.npy", cm)
-log_message("Saved confusion matrix to 'confusion_matrix.npy'.")
+cm_path = os.path.join(OUTPUT_DIR, "confusion_matrix.npy")
+np.save(cm_path, cm)
+log_message(f"Saved confusion matrix to '{cm_path}'.")
 
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
 disp.plot(cmap='Blues', values_format='d')
 plt.title("Confusion Matrix (Final Model)")
 plt.tight_layout()
-plt.savefig("confusion_matrix_nn.png", bbox_inches='tight')
+cm_fig_path = os.path.join(OUTPUT_DIR, "confusion_matrix_nn.png")
+plt.savefig(cm_fig_path, bbox_inches='tight')
 plt.close()
 
 class_report = classification_report(y_test, y_pred)
@@ -348,12 +347,21 @@ metrics_dict = {
     "optuna_best_params": best_params,
     "optuna_best_cv_score": float(best_score)
 }
-with open("metrics.json", "w") as f:
+metrics_path = os.path.join(OUTPUT_DIR, "metrics.json")
+with open(metrics_path, "w") as f:
     json.dump(metrics_dict, f, indent=2)
 
+log_message(f"Saved metrics to '{metrics_path}'.")
+
 # Save final model weights
-torch.save(final_clf.model_.state_dict(), "best_model_state.pth")
-log_message("Saved final model's state_dict to 'best_model_state.pth'.")
+model_path = os.path.join(OUTPUT_DIR, "best_model_state.pth")
+torch.save(final_clf.model_.state_dict(), model_path)
+log_message(f"Saved final model's state_dict to '{model_path}'.")
 
+# Save a log of steps
+log_path = os.path.join(OUTPUT_DIR, "log_steps.json")
+with open(log_path, "w") as f:
+    json.dump(log_steps, f, indent=2)
+
+log_message(f"Saved detailed log with timestamps to '{log_path}'.")
 log_message("All done!")
-
