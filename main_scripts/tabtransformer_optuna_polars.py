@@ -453,7 +453,7 @@ class TabTransformerClassifierWithVal:
 def objective(trial):
     # Suggest hyperparameters
     transformer_dim = trial.suggest_categorical("transformer_dim", [16, 32, 64])
-    depth = trial.suggest_int("depth", 1, 20)
+    depth = trial.suggest_int("depth", 3, 20)
     # Only allow heads that evenly divide transformer_dim
     valid_heads = [h for h in [1, 2, 3, 4] if transformer_dim % h == 0]
     heads = trial.suggest_categorical("heads", valid_heads)
@@ -491,7 +491,7 @@ def objective(trial):
 
 log_message("Starting hyperparameter optimization with Optuna...")
 study = optuna.create_study(direction="maximize")
-study.optimize(objective, n_trials=20)
+study.optimize(objective, n_trials=40)
 best_params = study.best_params
 log_message(f"Best hyperparameters found: {best_params}")
 
