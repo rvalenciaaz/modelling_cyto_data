@@ -55,12 +55,12 @@ for file_path in csv_files:
     temp_df = pl.read_csv(file_path)
     label_str = file_path.split('.')[0]  # e.g., "species1"
     # Add label column
-    temp_df = temp_df.with_column(pl.lit(label_str).alias("Label"))
+    temp_df = temp_df.with_columns(pl.lit(label_str).alias("Label"))
     df_list.append(temp_df)
 
 combined_df = pl.concat(df_list, how="vertical")
 # Strip "species" from Label: "species1" => "1"
-combined_df = combined_df.with_column(
+combined_df = combined_df.with_columns(
     pl.col("Label").str.replace("species", "")
 )
 log_message(f"Combined dataset shape: {combined_df.shape}")
