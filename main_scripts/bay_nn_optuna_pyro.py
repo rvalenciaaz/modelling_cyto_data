@@ -103,8 +103,8 @@ log_message(f"Number of features kept after MAD filtering: {len(features_to_keep
 # ---------------------------------------------------------
 log_message("Performing train/test split & scaling...")
 
-X = final_df.drop("Label", axis=1).to_numpy()
-y = final_df["Label"].to_numpy()
+X = final_df.select(pl.all().exclude("Label")).to_numpy()
+y = final_df.select("Label").to_numpy().ravel()
 
 label_encoder = LabelEncoder()
 y_encoded = label_encoder.fit_transform(y)
