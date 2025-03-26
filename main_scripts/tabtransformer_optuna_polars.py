@@ -453,7 +453,7 @@ class TabTransformerClassifierWithVal:
 def objective(trial):
     # Suggest hyperparameters
     transformer_dim = trial.suggest_categorical("transformer_dim", [16, 32, 64])
-    depth = trial.suggest_int("depth", 1, 4)
+    depth = trial.suggest_int("depth", 1, 20)
     # Only allow heads that evenly divide transformer_dim
     valid_heads = [h for h in [1, 2, 3, 4] if transformer_dim % h == 0]
     heads = trial.suggest_categorical("heads", valid_heads)
@@ -481,7 +481,7 @@ def objective(trial):
         mlp_hidden_dims=mlp_hidden_dims,
         learning_rate=learning_rate,
         batch_size=batch_size,
-        epochs=20,  # Fewer epochs for quick evaluation
+        epochs=30,  # Fewer epochs for quick evaluation
         verbose=False
     )
 
