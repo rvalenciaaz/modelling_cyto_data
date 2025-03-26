@@ -284,7 +284,7 @@ def predict_pyro_model(
 # ---------------------------------------------------------
 def objective(trial):
     hidden_size   = trial.suggest_int("hidden_size", 16, 128, step=16)
-    num_layers    = trial.suggest_int("num_layers", 1, 5)
+    num_layers    = trial.suggest_int("num_layers", 3, 50)
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
     num_epochs_tune = 5000  # fewer epochs for faster tuning
 
