@@ -286,7 +286,7 @@ def objective(trial):
     hidden_size   = trial.suggest_int("hidden_size", 16, 128, step=16)
     num_layers    = trial.suggest_int("num_layers", 1, 5)
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    num_epochs_tune = 3000  # fewer epochs for faster tuning
+    num_epochs_tune = 5000  # fewer epochs for faster tuning
 
     X_tune_train, X_val, y_tune_train, y_val = train_test_split(
         X_train_t, y_train_t, test_size=0.2, random_state=42, stratify=y_train_t
@@ -328,7 +328,7 @@ log_message(f"Best hyperparameters: {best_params}")
 log_message("Starting 5-fold CV with best hyperparams, tracking losses...")
 
 skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-num_epochs_cv = 1000
+num_epochs_cv = 20000
 
 fold_train_losses = []
 fold_val_losses   = []
@@ -433,7 +433,7 @@ log_message(f"Saved aggregated CV loss plot => {agg_folds_plot}")
 # ---------------------------------------------------------
 log_message("Final training on all training data...")
 
-num_epochs_final = 2000
+num_epochs_final = 20000
 final_guide, final_train_losses = train_pyro_model(
     X_train_t, y_train_t,
     hidden_size=best_hidden_size,
