@@ -313,7 +313,7 @@ def objective(trial):
 
 study = optuna.create_study(direction="maximize")
 log_message("Starting Optuna hyperparameter optimization...")
-study.optimize(objective, n_trials=10, timeout=None)  # Adjust n_trials as needed
+study.optimize(objective, n_trials=40, timeout=None)  # Adjust n_trials as needed
 log_message("Optuna hyperparameter optimization done.")
 
 best_params = study.best_params
