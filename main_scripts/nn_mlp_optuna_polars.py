@@ -1,6 +1,6 @@
-import glob
-import os
-import polars as pl
+import glob  # filename pattern
+import os   
+import polars as pl   # dataframe manipulation
 import numpy as np
 import json
 import datetime
