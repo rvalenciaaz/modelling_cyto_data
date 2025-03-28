@@ -69,7 +69,7 @@ mamba create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars
 
 There are several scripts that execute different pipelines, these are located in the main_scripts folder:
 
-- ``: Pipeline for
+- `nn_mlp_optuna_polars.py`: Pipeline for multi-class prediction using a MLP. The hyperparameters are optimised with Optuna, including 
 - ``: Pipeline for
 - ``: Pipeline for
 - ``: Pipeline for
