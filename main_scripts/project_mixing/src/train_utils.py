@@ -150,6 +150,7 @@ def tune_hyperparameters(
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials, timeout=None)
     return study.best_params
+    
 def nn_objective(trial, X_train, y_train, n_splits=3):
     """
     Optuna objective for the feedforward PyTorch approach.
