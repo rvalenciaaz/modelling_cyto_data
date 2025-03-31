@@ -86,3 +86,10 @@ def predict_pyro_probabilities(
     std_probs  = probs_samples.std(axis=0)   # shape (n_data, output_dim)
 
     return mean_probs, std_probs, probs_samples
+    
+def predict_pytorch_proba(clf, X):
+    """
+    If you specifically want a separate function for prob. prediction
+    with the PyTorchNNClassifierWithVal, but it's basically clf.predict_proba(X).
+    """
+    return clf.predict_proba(X)
