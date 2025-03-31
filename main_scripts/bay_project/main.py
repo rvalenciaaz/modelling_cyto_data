@@ -88,7 +88,7 @@ def main():
     # ---------------------------------------------------------
     log_message("Starting hyperparameter tuning with Optuna...")
     # You can define how many epochs are used per trial:
-    num_epochs_tune = 3000  
+    num_epochs_tune = 5000  
     best_params = tune_hyperparameters(
         X_train_t, y_train_t,
         n_trials=40,
