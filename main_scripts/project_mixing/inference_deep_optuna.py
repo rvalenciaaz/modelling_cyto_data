@@ -8,11 +8,6 @@ import joblib
 from src.model_utils import ConfigurableNN
 
 def load_artifacts(replication_folder="replication_files"):
-
-OUTPUT_DIR = "outputs"
-
-def main_inference():
-    # 1) Load artifacts
     scaler_path = os.path.join(OUTPUT_DIR, "scaler.joblib")
     label_encoder_path = os.path.join(OUTPUT_DIR, "label_encoder.joblib")
     features_path = os.path.join(OUTPUT_DIR, "features_used.json")
@@ -28,7 +23,21 @@ def main_inference():
         features_used = json.load(f)
     state_dict = torch.load(model_path, map_location=torch.device("cpu"))
 
-    # 2) Suppose you have a new CSV for inference
+
+def predict_new_data(
+    new_data_df,
+    scaler,
+    label_encoder,
+    features_to_keep,
+    hidden_size=32,
+    num_layers=2,
+    output_dim=None,
+    num_samples=500
+):
+
+OUTPUT_DIR = "outputs"
+
+def main_inference():
     new_data_path = "new_species_data.csv"
     if not os.path.exists(new_data_path):
         print(f"ERROR: '{new_data_path}' not found. Provide a file for inference.")
