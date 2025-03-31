@@ -71,6 +71,7 @@ def create_svi(model, guide, learning_rate=1e-3):
     optimizer = pyro.optim.Adam({"lr": learning_rate})
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     return svi
+    
 class ConfigurableNN(nn.Module):
     """
     A feedforward network with variable # of layers, hidden size, and optional dropout.
