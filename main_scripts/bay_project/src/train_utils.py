@@ -97,7 +97,7 @@ def objective_optuna(trial, X_train_t, y_train_t):
     hidden_size   = trial.suggest_int("hidden_size", 16, 128, step=16)
     num_layers    = trial.suggest_int("num_layers", 3, 50)
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    num_epochs_tune = 5000  # fewer epochs for faster tuning
+    num_epochs_tune = 5000  # fewer epochs for faster tuning, this may be passed as a argument in tune hyperparameters
 
     X_tune_train, X_val, y_tune_train, y_val = train_test_split(
         X_train_t, y_train_t, test_size=0.2, random_state=42, stratify=y_train_t
