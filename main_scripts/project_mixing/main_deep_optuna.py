@@ -8,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 
+import torch
+
 # Local imports
 from src.data_utils import read_csv_files, log_message
 from src.mad_filter import filter_by_mad
@@ -41,11 +43,17 @@ def main():
     )
     log_message(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}", log_steps=log_steps)
 
-    # 4) Run Optuna
+    # 4) Run Optuna Tuning
     log_message("=== Starting Optuna hyperparameter optimization ===", log_steps=log_steps)
     best_params, best_score = run_optuna_tuning(X_train, y_train, n_trials=30, n_splits=3)
     log_message(f"Optuna best params: {best_params}", log_steps=log_steps)
     log_message(f"Optuna best CV accuracy: {best_score:.4f}", log_steps=log_steps)
+
+    # (NEW) Save best_params to a JSON so we can load them in inference:
+    best_params_path = os.path.join(OUTPUT_DIR, "best_params.json")
+    with open(best_params_path, "w") as f:
+        json.dump(best_params, f, indent=2)
+    log_message(f"Saved best_params to '{best_params_path}'", log_steps=log_steps)
 
     # 5) Final training (refit with best hyperparams)
     log_message("Re-fitting final model on entire training set...", log_steps=log_steps)
@@ -105,9 +113,7 @@ def main():
 
     # Save final model weights
     model_path = os.path.join(OUTPUT_DIR, "best_model_state.pth")
-    import torch
     torch.save(clf.model_.state_dict(), model_path)
-
     log_message(f"Saved final model state to '{model_path}'.", log_steps=log_steps)
     log_message(f"Saved metrics to '{metrics_path}'", log_steps=log_steps)
 
