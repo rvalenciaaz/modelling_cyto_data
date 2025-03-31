@@ -24,7 +24,7 @@ from src.train_utils import (
     train_pyro_model, #only for bayesian
     train_pyro_model_with_val  #only for bayesian
 )
-from src.prediction_utils import predict_pyro_model
+from src.prediction_utils import predict_pyro_model  #only for bayesian
 
 # Fix random seeds for reproducibility
 np.random.seed(42)
