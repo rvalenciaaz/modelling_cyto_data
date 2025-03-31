@@ -8,6 +8,14 @@ import joblib
 from src.model_utils import ConfigurableNN
 
 def load_artifacts(replication_folder="replication_files"):
+    """
+    Loads:
+      - State dict
+      - Scaler
+      - LabelEncoder
+      - Features to keep
+      - Best hyperparams from best_params.json
+    """
     scaler_path = os.path.join(OUTPUT_DIR, "scaler.joblib")
     label_encoder_path = os.path.join(OUTPUT_DIR, "label_encoder.joblib")
     features_path = os.path.join(OUTPUT_DIR, "features_used.json")
