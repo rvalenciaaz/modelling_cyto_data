@@ -89,20 +89,27 @@ def train_pyro_model_with_val(
     return guide, train_losses, val_losses
 
 
-def objective_optuna(trial, X_train_t, y_train_t):
+def objective_optuna(
+    trial,
+    X_train_t,
+    y_train_t,
+    num_epochs_tune
+):
     """
     Objective function for Optuna to tune hyperparameters.
-    Splits off a validation set from the training data and returns val accuracy.
+    Uses 'num_epochs_tune' from the caller for faster or slower tuning.
     """
     hidden_size   = trial.suggest_int("hidden_size", 16, 128, step=16)
     num_layers    = trial.suggest_int("num_layers", 3, 50)
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    num_epochs_tune = 5000  # fewer epochs for faster tuning, this may be passed as a argument in tune hyperparameters
 
+    # Split off a validation set from the training data
+    from sklearn.model_selection import train_test_split
     X_tune_train, X_val, y_tune_train, y_val = train_test_split(
         X_train_t, y_train_t, test_size=0.2, random_state=42, stratify=y_train_t
     )
 
+    # Train with the given epochs
     guide, _ = train_pyro_model(
         X_tune_train,
         y_tune_train,
@@ -110,10 +117,11 @@ def objective_optuna(trial, X_train_t, y_train_t):
         num_layers=num_layers,
         output_dim=len(np.unique(y_train_t)),
         learning_rate=learning_rate,
-        num_epochs=num_epochs_tune,
+        num_epochs=num_epochs_tune,  # <= used here
         verbose=False
     )
 
+    # Predict on validation
     from .prediction_utils import predict_pyro_model
     val_preds = predict_pyro_model(
         X_val,
@@ -126,13 +134,18 @@ def objective_optuna(trial, X_train_t, y_train_t):
     return accuracy_score(y_val, val_preds)
 
 
-def tune_hyperparameters(X_train_t, y_train_t, n_trials=40):
+def tune_hyperparameters(
+    X_train_t,
+    y_train_t,
+    n_trials=40,
+    num_epochs_tune=5000
+):
     """
     Runs an Optuna study to maximize accuracy on a hold-out validation subset.
-    Returns the best hyperparams dict.
+    'num_epochs_tune' can now be specified by the caller.
     """
     def objective(trial):
-        return objective_optuna(trial, X_train_t, y_train_t)
+        return objective_optuna(trial, X_train_t, y_train_t, num_epochs_tune)
 
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials, timeout=None)
