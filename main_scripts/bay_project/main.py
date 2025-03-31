@@ -17,12 +17,12 @@ from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
 
 # Local project imports
-from src.data_utils import read_and_combine_csv
-from src.mad_filter import mad_feature_filter
+from src.data_utils import read_and_combine_csv #use by everyone
+from src.mad_filter import mad_feature_filter   #use by everyone
 from src.train_utils import (
-    tune_hyperparameters,
-    train_pyro_model,
-    train_pyro_model_with_val
+    tune_hyperparameters, #only for bayesian, i think
+    train_pyro_model, #only for bayesian
+    train_pyro_model_with_val  #only for bayesian
 )
 from src.prediction_utils import predict_pyro_model
 
