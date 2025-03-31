@@ -79,7 +79,7 @@ def main():
     # 4. OPTUNA HYPERPARAMETER TUNING
     # ---------------------------------------------------------
     log_message("Starting hyperparameter tuning with Optuna...")
-    best_params = tune_hyperparameters(X_train_t, y_train_t, n_trials=40)
+    best_params = tune_hyperparameters(X_train_t, y_train_t, n_trials=30) # 40 trials may take a long time
     hidden_size   = best_params["hidden_size"]
     num_layers    = best_params["num_layers"]
     learning_rate = best_params["learning_rate"]
