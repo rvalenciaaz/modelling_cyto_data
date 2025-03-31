@@ -3,31 +3,37 @@ import json
 import datetime
 import pickle
 import numpy as np
+import polars as pl
+
 import torch
 import pyro
 
+# scikit-learn
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import accuracy_score, classification_report
 
+# Plotting
 import matplotlib.pyplot as plt
 
-# Local imports from src/
+# Local project imports
 from src.data_utils import read_and_combine_csv
 from src.mad_filter import mad_feature_filter
 from src.train_utils import (
-    train_pyro_model, train_pyro_model_with_val,
-    predict_pyro_model, tune_hyperparameters
+    tune_hyperparameters,
+    train_pyro_model,
+    train_pyro_model_with_val
 )
-from src.prediction_utils import predict_pyro_model as predict_pyro_model_fn
-from src.prediction_utils import predict_pyro_probabilities
+from src.prediction_utils import predict_pyro_model
 
-# Fix seeds for reproducibility
+# Fix random seeds for reproducibility
 np.random.seed(42)
 torch.manual_seed(42)
 pyro.set_rng_seed(42)
 
-# 0. Logging utility & output folder
+# ---------------------------------------------------------
+# LOGGING UTILITY & OUTPUT FOLDER
+# ---------------------------------------------------------
 log_steps = []
 def log_message(message: str):
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -39,21 +45,23 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 def main():
     # ---------------------------------------------------------
-    # 1. READ CSV FILES & COMBINE
+    # 1. READ & COMBINE CSV FILES
     # ---------------------------------------------------------
-    log_message("Reading and combining CSV files...")
+    log_message("Reading CSV files (pattern='species*.csv')...")
     combined_df = read_and_combine_csv(label_prefix="species", pattern="species*.csv")
     log_message(f"Combined dataset shape: {combined_df.shape}")
 
     # ---------------------------------------------------------
     # 2. MAD-BASED FEATURE FILTER
     # ---------------------------------------------------------
-    log_message("Filtering features by MAD...")
-    final_df, features_to_keep = mad_feature_filter(combined_df, label_col="Label", mad_threshold=5)
+    log_message("Applying MAD filter (threshold=5)...")
+    final_df, features_to_keep = mad_feature_filter(
+        data=combined_df, label_col="Label", mad_threshold=5
+    )
     log_message(f"Kept {len(features_to_keep)} features after MAD filter.")
 
     # ---------------------------------------------------------
-    # 3. TRAIN/TEST SPLIT & SCALING
+    # 3. TRAIN/TEST SPLIT + SCALING
     # ---------------------------------------------------------
     X = final_df.drop("Label").to_numpy()
     y = final_df.select("Label").to_numpy().ravel()
@@ -64,7 +72,7 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
-    # stratify is important in the case of imbalance datasets
+
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test  = scaler.transform(X_test)
@@ -76,36 +84,31 @@ def main():
     y_test_t  = torch.tensor(y_test,  dtype=torch.long)
 
     # ---------------------------------------------------------
-    # 4. OPTUNA HYPERPARAMETER TUNING
+    # 4. HYPERPARAMETER TUNING (OPTUNA)
     # ---------------------------------------------------------
-    num_epochs_optuna = 5000
-
     log_message("Starting hyperparameter tuning with Optuna...")
+    # You can define how many epochs are used per trial:
+    num_epochs_tune = 3000  
     best_params = tune_hyperparameters(
-        X_train_t,
-        y_train_t,
+        X_train_t, y_train_t,
         n_trials=40,
-        num_epochs_tune=num_epochs_optuna  # <= now explicitly defined
+        num_epochs_tune=num_epochs_tune
     )
-    
     hidden_size   = best_params["hidden_size"]
     num_layers    = best_params["num_layers"]
     learning_rate = best_params["learning_rate"]
-    log_message(f"Best hyperparameters: {best_params}")
+    log_message(f"Best hyperparameters found: {best_params}")
 
     # ---------------------------------------------------------
     # 5. 5-FOLD CROSS VALIDATION
     # ---------------------------------------------------------
-    log_message("Starting 5-fold CV with best hyperparams...")
+    log_message("Performing 5-fold CV with best hyperparams...")
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     num_epochs_cv = 20000
     fold_train_losses = []
     fold_val_losses   = []
-    fold_accuracies  = []
-
-    from src.train_utils import train_pyro_model_with_val
-    from src.prediction_utils import predict_pyro_model
+    fold_accuracies   = []
 
     for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
         X_fold_train, X_fold_val = X_train[tr_idx], X_train[val_idx]
@@ -130,6 +133,7 @@ def main():
         fold_train_losses.append(train_losses_cv)
         fold_val_losses.append(val_losses_cv)
 
+        # Predict on validation fold
         val_preds_fold = predict_pyro_model(
             X_fold_val_t, guide_cv,
             hidden_size=hidden_size,
@@ -145,12 +149,13 @@ def main():
     cv_std_accuracy  = np.std(fold_accuracies)
     log_message(f"CV Accuracy: {cv_mean_accuracy:.4f} ± {cv_std_accuracy:.4f}")
 
-    # Save fold losses
+    # Save fold train/val losses for replication
     cv_fold_losses_path = os.path.join(OUTPUT_FOLDER, "cv_fold_losses.pkl")
     with open(cv_fold_losses_path, "wb") as f:
         pickle.dump({"train_losses": fold_train_losses, "val_losses": fold_val_losses}, f)
+    log_message(f"Saved CV fold losses => {cv_fold_losses_path}")
 
-    # Plot all-folds loss
+    # Plot all fold train/val losses
     plt.figure(figsize=(10, 6))
     for i in range(len(fold_train_losses)):
         epochs = range(1, len(fold_train_losses[i]) + 1)
@@ -166,7 +171,7 @@ def main():
     plt.savefig(all_folds_plot)
     plt.close()
 
-    # Plot aggregated mean ± std
+    # Plot aggregated mean ± std across folds
     all_train_arr = np.array(fold_train_losses)
     all_val_arr   = np.array(fold_val_losses)
     mean_train = all_train_arr.mean(axis=0)
@@ -195,7 +200,6 @@ def main():
     # ---------------------------------------------------------
     log_message("Final training on full training data...")
     num_epochs_final = 20000
-    from src.train_utils import train_pyro_model
     final_guide, final_train_losses = train_pyro_model(
         X_train_t, y_train_t,
         hidden_size=hidden_size,
@@ -206,12 +210,13 @@ def main():
         verbose=True
     )
 
-    # Save final train loss
+    # Save final training losses
     final_losses_file = os.path.join(OUTPUT_FOLDER, "final_losses.pkl")
     with open(final_losses_file, "wb") as f:
         pickle.dump(final_train_losses, f)
+    log_message(f"Saved final training losses => {final_losses_file}")
 
-    # Plot final train loss
+    # Plot final training loss
     epochs_fin = range(1, len(final_train_losses)+1)
     plt.figure(figsize=(10, 6))
     plt.plot(epochs_fin, final_train_losses, label='Final Training Loss')
@@ -223,10 +228,12 @@ def main():
     final_plot_path = os.path.join(OUTPUT_FOLDER, "final_training_loss.png")
     plt.savefig(final_plot_path)
     plt.close()
+    log_message(f"Saved final training loss plot => {final_plot_path}")
 
-    # TEST PREDICTION
+    # ---------------------------------------------------------
+    # 7. TEST SET EVALUATION
+    # ---------------------------------------------------------
     log_message("Predicting on test set with final model...")
-    from src.prediction_utils import predict_pyro_model
     test_preds = predict_pyro_model(
         X_test_t,
         final_guide,
@@ -242,8 +249,9 @@ def main():
     log_message("\nClassification Report:\n" + class_rep)
 
     # ---------------------------------------------------------
-    # 7. SAVE ARTIFACTS (metrics, model, scaler, encoder, features, logs)
+    # 8. SAVE ARTIFACTS
     # ---------------------------------------------------------
+    # Save general metrics (includes best hyperparams)
     metrics_dict = {
         "best_hyperparams": best_params,
         "cv_mean_accuracy": float(cv_mean_accuracy),
@@ -254,28 +262,43 @@ def main():
     metrics_path = os.path.join(OUTPUT_FOLDER, "metrics_pyro.json")
     with open(metrics_path, "w") as f:
         json.dump(metrics_dict, f, indent=2)
+    log_message(f"Saved metrics => {metrics_path}")
 
+    # NEW: Save best_params to its own file
+    best_params_file = os.path.join(OUTPUT_FOLDER, "best_params.json")
+    with open(best_params_file, "w") as f:
+        json.dump(best_params, f, indent=2)
+    log_message(f"Saved best hyperparams => {best_params_file}")
+
+    # Save final Pyro guide
     guide_state = final_guide.state_dict()
     guide_params_path = os.path.join(OUTPUT_FOLDER, "bayesian_nn_pyro_params.pkl")
     with open(guide_params_path, "wb") as f:
         pickle.dump(guide_state, f)
+    log_message(f"Saved final guide params => {guide_params_path}")
 
+    # Save scaler, label encoder
     scaler_path = os.path.join(OUTPUT_FOLDER, "scaler.pkl")
     with open(scaler_path, "wb") as f:
         pickle.dump(scaler, f)
+    log_message(f"Saved scaler => {scaler_path}")
 
     encoder_path = os.path.join(OUTPUT_FOLDER, "label_encoder.pkl")
     with open(encoder_path, "wb") as f:
         pickle.dump(label_encoder, f)
+    log_message(f"Saved label encoder => {encoder_path}")
 
+    # Save features
     features_path = os.path.join(OUTPUT_FOLDER, "features_to_keep.json")
     with open(features_path, "w") as f:
         json.dump(features_to_keep, f, indent=2)
+    log_message(f"Saved features to keep => {features_path}")
 
-    # Save log steps
+    # Save timestamp log
     log_path = os.path.join(OUTPUT_FOLDER, "log_steps_pyro.json")
     with open(log_path, "w") as f:
         json.dump(log_steps, f, indent=2)
+    log_message(f"Saved log => {log_path}")
 
     log_message("All done!")
 
