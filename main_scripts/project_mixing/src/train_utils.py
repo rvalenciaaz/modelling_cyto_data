@@ -150,3 +150,55 @@ def tune_hyperparameters(
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials, timeout=None)
     return study.best_params
+def nn_objective(trial, X_train, y_train, n_splits=3):
+    """
+    Optuna objective for the feedforward PyTorch approach.
+    Uses K-Fold to get an average accuracy.
+    """
+    hidden_size   = trial.suggest_categorical('hidden_size', [32, 64, 128])
+    num_layers    = trial.suggest_int('num_layers', 3, 30)
+    dropout       = trial.suggest_float('dropout', 0.0, 0.5, step=0.1)
+    learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-3, log=True)
+    batch_size    = trial.suggest_categorical('batch_size', [64, 128, 256])
+    epochs        = 20  # fewer epochs for quick search
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    accuracy_scores = []
+
+    for train_idx, val_idx in kf.split(X_train, y_train):
+        X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
+        y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
+
+        # Scale each fold
+        scaler_fold = StandardScaler()
+        X_tr_fold_scaled = scaler_fold.fit_transform(X_tr_fold)
+        X_val_fold_scaled = scaler_fold.transform(X_val_fold)
+
+        clf = PyTorchNNClassifierWithVal(
+            hidden_size=hidden_size,
+            learning_rate=learning_rate,
+            batch_size=batch_size,
+            epochs=epochs,
+            num_layers=num_layers,
+            dropout=dropout,
+            verbose=False
+        )
+        clf.fit(X_tr_fold_scaled, y_tr_fold, X_val_fold_scaled, y_val_fold)
+
+        preds_fold = clf.predict(X_val_fold_scaled)
+        fold_acc = accuracy_score(y_val_fold, preds_fold)
+        accuracy_scores.append(fold_acc)
+
+    return np.mean(accuracy_scores)
+
+def run_nn_optuna(X_train, y_train, n_trials=30):
+    """
+    Runs an Optuna study for the feedforward PyTorch classifier.
+    Returns best_params, best_score.
+    """
+    def func(trial):
+        return nn_objective(trial, X_train, y_train, n_splits=3)
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(func, n_trials=n_trials)
+    return study.best_params, study.best_value
