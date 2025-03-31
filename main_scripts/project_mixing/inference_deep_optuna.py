@@ -7,6 +7,8 @@ import joblib
 
 from src.model_utils import ConfigurableNN
 
+def load_artifacts(replication_folder="replication_files"):
+
 OUTPUT_DIR = "outputs"
 
 def main_inference():
