@@ -28,7 +28,7 @@ def main():
     # 2) MAD filter
     filtered_df, features_to_keep = filter_by_mad(combined_df, label_col="Label", mad_threshold=5.0)
     log_message(f"Number of features kept after MAD filter: {len(features_to_keep)}", log_steps=log_steps)
-
+    #check which ones to move
     # 3) Prepare X, y
     X = filtered_df.drop("Label").to_numpy()
     y = filtered_df["Label"].to_numpy()
