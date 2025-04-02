@@ -7,6 +7,8 @@ import pyro.infer.autoguide as autoguide
 import torch.nn as nn
 import numpy as np
 
+from sklearn.base import BaseEstimator, ClassifierMixin
+
 
 def bayesian_nn_model(x, y=None, hidden_size=32, num_layers=2, output_dim=2):
     """
