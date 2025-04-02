@@ -55,7 +55,7 @@ def bayesian_nn_model(x, y=None, hidden_size=32, num_layers=2, output_dim=2):
     )
 
     logits = hidden @ w_out + b_out
-
+    # does it return the logits directly?
     # Create a deterministic node for logits so we can retrieve them in predictions
     pyro.deterministic("logits", logits)
 
