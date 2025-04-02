@@ -13,6 +13,8 @@ from cuml.linear_model import LogisticRegression
 from cuml.svm import SVC
 from xgboost import XGBClassifier
 
+from model_utils import TabTransformerClassifierWithVal
+
 from .model_utils import bayesian_nn_model, create_guide, create_svi
 
 def train_pyro_model(
@@ -284,4 +286,45 @@ def objective_svm(trial, X_cpu, y_cpu, random_seed=42):
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_seed)
     scores = cross_val_score(model, X_cpu, y_cpu, cv=cv, scoring="accuracy", n_jobs=-1)
     return scores.mean()
+
+# train_utils.py
+
+
+def objective(trial, X_categ_train, X_num_train, y_train):
+    # Suggest hyperparameters
+    transformer_dim = trial.suggest_categorical("transformer_dim", [16, 32, 64])
+    depth = trial.suggest_int("depth", 1, 4)
+    valid_heads = [h for h in [1, 2, 3, 4] if transformer_dim % h == 0]
+    heads = trial.suggest_categorical("heads", valid_heads)
+    dim_forward = trial.suggest_int("dim_forward", 32, 128, step=32)
+    dropout = trial.suggest_float("dropout", 0.1, 0.5)
+    mlp_hidden_dim1 = trial.suggest_int("mlp_hidden_dim1", 32, 128, step=32)
+    mlp_hidden_dim2 = trial.suggest_int("mlp_hidden_dim2", 16, 64, step=16)
+    learning_rate = trial.suggest_loguniform("learning_rate", 1e-4, 1e-2)
+    batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
+
+    mlp_hidden_dims = [mlp_hidden_dim1, mlp_hidden_dim2]
+
+    # Create a hold-out split from the training set for fast evaluation
+    X_cat_tr, X_cat_val, X_num_tr, X_num_val, y_tr, y_val = train_test_split(
+        X_categ_train, X_num_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+    )
+
+    clf = TabTransformerClassifierWithVal(
+        transformer_dim=transformer_dim,
+        depth=depth,
+        heads=heads,
+        dim_forward=dim_forward,
+        dropout=dropout,
+        mlp_hidden_dims=mlp_hidden_dims,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        epochs=20,  # Fewer epochs for fast evaluation
+        verbose=False
+    )
+
+    clf.fit(X_cat_tr, X_num_tr, y_tr, X_cat_val, X_num_val, y_val)
+    val_accuracy = clf.score(X_cat_val, X_num_val, y_val)
+    return val_accuracy
+
 
