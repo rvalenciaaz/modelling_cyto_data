@@ -105,6 +105,8 @@ log_message("Splitting data into training and test sets...")
 X_categ_train, X_categ_test, X_num_train, X_num_test, y_train, y_test = train_test_split(
     X_categ, X_numeric, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
 )
+
+np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
 log_message(f"Train set size: {X_categ_train.shape[0]}, Test set size: {X_categ_test.shape[0]}")
 
 # ---------------------------
