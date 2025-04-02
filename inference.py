@@ -7,58 +7,13 @@ import pickle
 import numpy as np
 import torch
 import pyro
+import polars as pl
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 # Local imports
 from src.model_utils import bayesian_nn_model, create_guide
-# For this full example, we include the helper functions here.
-# In your original project these may be imported from src.prediction_utils.
-
-def predict_pyro_model(X_new_t, guide, hidden_size, num_layers, output_dim, num_samples):
-    """
-    Returns the predicted class indices using majority vote over posterior samples.
-    """
-    from pyro.infer import Predictive
-    predictive = pyro.infer.Predictive(bayesian_nn_model, guide=guide, num_samples=num_samples)
-    samples = predictive(X_new_t, None, hidden_size=hidden_size, num_layers=num_layers, output_dim=output_dim)
-    # samples["obs"] has shape (num_samples, n_data)
-    obs_samples = samples["obs"].cpu().numpy()
-
-    # For each data row, compute the majority vote over samples.
-    preds = []
-    n_data = obs_samples.shape[1]
-    for i in range(n_data):
-        pred = np.bincount(obs_samples[:, i], minlength=output_dim).argmax()
-        preds.append(pred)
-    return np.array(preds)
-
-def predict_pyro_probabilities(X_new_t, guide, hidden_size, num_layers, output_dim, num_samples):
-    """
-    Returns:
-      mean_probs: (n_data, output_dim) mean probability vector per data point.
-      std_probs:  (n_data, output_dim) std of probability vectors.
-      prob_samples: (num_samples, n_data, output_dim) one-hot encoded samples.
-    """
-    from pyro.infer import Predictive
-    predictive = pyro.infer.Predictive(bayesian_nn_model, guide=guide, num_samples=num_samples)
-    samples = predictive(X_new_t, None, hidden_size=hidden_size, num_layers=num_layers, output_dim=output_dim)
-    # samples["obs"] has shape (num_samples, n_data)
-    obs_samples = samples["obs"].cpu().numpy()
-    n_data = obs_samples.shape[1]
-
-    # Convert class indices into one-hot encoded probability vectors.
-    prob_samples = np.zeros((num_samples, n_data, output_dim))
-    for s in range(num_samples):
-        for i in range(n_data):
-            one_hot = np.zeros(output_dim)
-            one_hot[obs_samples[s, i]] = 1
-            prob_samples[s, i, :] = one_hot
-
-    # Compute the mean and standard deviation along the samples axis.
-    mean_probs = np.mean(prob_samples, axis=0)  # shape: (n_data, output_dim)
-    std_probs = np.std(prob_samples, axis=0)    # shape: (n_data, output_dim)
-    return mean_probs, std_probs, prob_samples
+from src.prediction_utils import predict_pyro_model, predict_pyro_probabilities  # now using external functions
 
 def load_artifacts(replication_folder="replication_files"):
     """
@@ -127,12 +82,12 @@ def predict_new_data(
       std_probs:  shape [n_data, output_dim]
       prob_samples: shape [num_samples, n_data, output_dim]
     """
-    # 1) Check columns
+    # 1) Check that all required columns are present
     missing_cols = set(features_to_keep) - set(new_data_df.columns)
     if missing_cols:
         raise ValueError(f"Missing required columns in new data: {missing_cols}")
 
-    # 2) Extract & scale
+    # 2) Extract features and scale them
     X_new = new_data_df.select(features_to_keep).to_numpy()
     X_new = scaler.transform(X_new)
     X_new_t = torch.tensor(X_new, dtype=torch.float32)
@@ -140,7 +95,7 @@ def predict_new_data(
     if output_dim is None:
         output_dim = len(label_encoder.classes_)
 
-    # 3) Get majority-vote predictions
+    # 3) Get majority-vote predictions using the external predict function
     preds_class_ids = predict_pyro_model(
         X_new_t, guide,
         hidden_size=hidden_size,
@@ -150,7 +105,7 @@ def predict_new_data(
     )
     predicted_class_labels = label_encoder.inverse_transform(preds_class_ids)
 
-    # 4) Get full probability samples + mean/std
+    # 4) Get full probability samples along with mean and std using the external function
     mean_probs, std_probs, prob_samples = predict_pyro_probabilities(
         X_new_t, guide,
         hidden_size=hidden_size,
@@ -159,7 +114,7 @@ def predict_new_data(
         num_samples=num_samples
     )
 
-    # Debug: print shapes to verify correctness
+    # Debug prints to verify shapes
     print("Predicted labels shape:", predicted_class_labels.shape)
     print("Mean probabilities shape:", mean_probs.shape)
     print("Std probabilities shape:", std_probs.shape)
@@ -167,17 +122,16 @@ def predict_new_data(
     return predicted_class_labels, mean_probs, std_probs, prob_samples
 
 def main_inference():
-    # 1) Load artifacts (guide, scaler, encoder, features, best_params)
+    # 1) Load artifacts (guide, scaler, label encoder, feature list, best hyperparameters)
     replication_folder = "replication_files"
     guide, scaler, label_encoder, features_to_keep, best_params = load_artifacts(replication_folder)
 
     # 2) Load new data
-    import polars as pl
-    new_data_path = "6-species_mock.csv"  # Adjust as needed
+    new_data_path = "6-species_mock.csv"  # Adjust path as needed
     new_data_df = pl.read_csv(new_data_path)
     print(f"Loaded new data from '{new_data_path}', shape={new_data_df.shape}")
 
-    # 3) Determine architecture from best_params
+    # 3) Set model architecture parameters from best_params
     hidden_size = best_params["hidden_size"]
     num_layers  = best_params["num_layers"]
     output_dim  = len(label_encoder.classes_)
@@ -201,7 +155,7 @@ def main_inference():
         num_samples=num_samples
     )
 
-    # 5A) Save a CSV summary with Predicted Class, Mean, and Std
+    # 5A) Save a CSV summary with predicted class, mean, and std probabilities
     output_csv = "inference_predictions.csv"
     with open(output_csv, "w", newline="") as f:
         writer = csv.writer(f)
@@ -213,16 +167,16 @@ def main_inference():
             header.append(f"StdProb_Class{i}")
         writer.writerow(header)
 
-        # Write rows
+        # Write prediction rows
         for i, pred_class in enumerate(predicted_labels):
             row = [i, pred_class]
-            row.extend(mean_probs[i])  # append the mean probability vector
-            row.extend(std_probs[i])   # append the std probability vector
+            row.extend(mean_probs[i])  # append mean probability vector
+            row.extend(std_probs[i])   # append std probability vector
             writer.writerow(row)
 
     print(f"Saved inference summary => {output_csv}")
 
-    # 5B) Save the entire distribution of probability samples
+    # 5B) Save the entire distribution of probability samples as a pickle file
     output_pkl = "inference_probability_samples.pkl"
     with open(output_pkl, "wb") as f:
         pickle.dump(prob_samples, f)
