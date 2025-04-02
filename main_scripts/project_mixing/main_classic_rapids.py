@@ -107,6 +107,8 @@ def main():
         random_state=RANDOM_SEED,
         stratify=y_encoded
     )
+    # After train/test split (and any preprocessing)
+    np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
 
     scaler = StandardScaler()
     X_train_scaled_cpu = scaler.fit_transform(X_train)
