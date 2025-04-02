@@ -41,6 +41,8 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
+
+    np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
     log_message(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}", log_steps=log_steps)
 
     # 4) Run Optuna Tuning
