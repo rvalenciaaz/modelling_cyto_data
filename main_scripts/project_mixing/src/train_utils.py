@@ -5,6 +5,14 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import accuracy_score
 import optuna
 
+import cupy as cp
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.metrics import accuracy_score
+from cuml.ensemble import RandomForestClassifier
+from cuml.linear_model import LogisticRegression
+from cuml.svm import SVC
+from xgboost import XGBClassifier
+
 from .model_utils import bayesian_nn_model, create_guide, create_svi
 
 def train_pyro_model(
@@ -203,3 +211,77 @@ def run_nn_optuna(X_train, y_train, n_trials=30):
     study = optuna.create_study(direction="maximize")
     study.optimize(func, n_trials=n_trials)
     return study.best_params, study.best_value
+
+def objective_rf(trial, X_cpu, y_cpu, random_seed=42):
+    n_estimators = trial.suggest_int("n_estimators", 100, 400, step=100)
+    max_depth = trial.suggest_int("max_depth", 5, 30, step=5)
+    model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        random_state=random_seed
+    )
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_seed)
+    scores = cross_val_score(model, X_cpu, y_cpu, cv=cv, scoring="accuracy", n_jobs=-1)
+    return scores.mean()
+
+def objective_lr(trial, X_cpu, y_cpu, random_seed=42):
+    C = trial.suggest_float("C", 1e-3, 1e3, log=True)
+    model = LogisticRegression(
+        C=C,
+        random_state=random_seed,
+        max_iter=2000
+    )
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_seed)
+    scores = cross_val_score(model, X_cpu, y_cpu, cv=cv, scoring="accuracy", n_jobs=-1)
+    return scores.mean()
+
+def gpu_cv_xgb(model, X_gpu, y_gpu, n_splits=3, random_seed=42):
+    # Convert CuPy arrays to CPU for indexing
+    X_cpu = cp.asnumpy(X_gpu)
+    y_cpu = cp.asnumpy(y_gpu)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_seed)
+    fold_accuracies = []
+    for train_idx, val_idx in skf.split(X_cpu, y_cpu):
+        X_train_fold = X_gpu[train_idx]
+        y_train_fold = y_gpu[train_idx]
+        X_val_fold   = X_gpu[val_idx]
+        y_val_fold   = y_gpu[val_idx]
+        model.fit(X_train_fold, y_train_fold)
+        y_pred_val = model.predict(X_val_fold)
+        acc = accuracy_score(cp.asnumpy(y_val_fold), cp.asnumpy(y_pred_val))
+        fold_accuracies.append(acc)
+    return fold_accuracies
+
+def objective_xgb(trial, X_gpu, y_gpu, random_seed=42):
+    n_estimators = trial.suggest_int("n_estimators", 100, 300, step=100)
+    max_depth = trial.suggest_int("max_depth", 3, 10)
+    learning_rate = trial.suggest_float("learning_rate", 1e-3, 0.3, log=True)
+    model = XGBClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        tree_method="hist",
+        device="cuda",
+        random_state=random_seed,
+        eval_metric='mlogloss'
+    )
+    cv_scores = gpu_cv_xgb(model, X_gpu, y_gpu, n_splits=3, random_seed=random_seed)
+    return np.mean(cv_scores)
+
+def objective_svm(trial, X_cpu, y_cpu, random_seed=42):
+    C = trial.suggest_float("C", 1e-3, 1e3, log=True)
+    kernel = trial.suggest_categorical("kernel", ["linear", "rbf"])
+    if kernel == "rbf":
+        gamma = trial.suggest_float("gamma", 1e-4, 1e0, log=True)
+    else:
+        gamma = "auto"
+    model = SVC(
+        C=C,
+        kernel=kernel,
+        gamma=gamma,
+        random_state=random_seed
+    )
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_seed)
+    scores = cross_val_score(model, X_cpu, y_cpu, cv=cv, scoring="accuracy", n_jobs=-1)
+    return scores.mean()
+
