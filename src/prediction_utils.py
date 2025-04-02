@@ -75,16 +75,20 @@ def predict_pyro_probabilities(
         num_layers=num_layers,
         output_dim=output_dim
     )
-    # shape: (num_samples, n_data, output_dim)
+    # Get logits samples; expected shape might be (num_samples, 1, n_data, output_dim)
     logits_samples = samples["logits"].detach().cpu().numpy()
 
-    # Convert logits to probabilities
-    probs_samples = softmax_3d(logits_samples)  # shape (num_samples, n_data, output_dim)
-
-    # Compute summary stats
-    mean_probs = probs_samples.mean(axis=0)  # shape (n_data, output_dim)
-    std_probs  = probs_samples.std(axis=0)   # shape (n_data, output_dim)
-
+    # Squeeze the extra dimension if it's present
+    if logits_samples.ndim == 4 and logits_samples.shape[1] == 1:
+        logits_samples = np.squeeze(logits_samples, axis=1)
+    
+    # Now logits_samples should have shape (num_samples, n_data, output_dim)
+    probs_samples = softmax_3d(logits_samples)
+    
+    # Compute summary stats along the sample axis
+    mean_probs = probs_samples.mean(axis=0)  # shape: (n_data, output_dim)
+    std_probs  = probs_samples.std(axis=0)   # shape: (n_data, output_dim)
+    
     return mean_probs, std_probs, probs_samples
     
 def predict_pytorch_proba(clf, X):
