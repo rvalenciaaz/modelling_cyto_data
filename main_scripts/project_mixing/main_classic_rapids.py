@@ -1,306 +1,426 @@
+# main.py
+import glob
 import os
-import json
-import datetime
-import pickle
+import joblib
+import pandas as pd
 import numpy as np
-import polars as pl
-
-import torch
-import pyro
-
-# scikit-learn
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.metrics import accuracy_score, classification_report
-
-# Plotting
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Local project imports
-from src.data_utils import read_and_combine_csv
-from src.mad_filter import mad_feature_filter
-from src.train_utils import (
-    tune_hyperparameters,
-    train_pyro_model,
-    train_pyro_model_with_val
+# sklearn & RAPIDS / XGBoost
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import (
+    classification_report,
+    accuracy_score,
+    confusion_matrix,
+    ConfusionMatrixDisplay
 )
-from src.prediction_utils import predict_pyro_model
+from cuml.ensemble import RandomForestClassifier
+from cuml.linear_model import LogisticRegression
+from cuml.svm import SVC
+from xgboost import XGBClassifier
 
-# Fix random seeds for reproducibility
-np.random.seed(42)
-torch.manual_seed(42)
-pyro.set_rng_seed(42)
+# Stats
+from scipy.stats import median_abs_deviation
 
-# ---------------------------------------------------------
-# LOGGING UTILITY & OUTPUT FOLDER
-# ---------------------------------------------------------
-log_steps = []
-def log_message(message: str):
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_steps.append(f"[{now_str}] {message}")
-    print(message)
+# GPU / CuPy
+import cupy as cp
 
-OUTPUT_FOLDER = "replication_files"
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+# Hyperparameter optimization
+import optuna
+from functools import partial
+
+# Import Optuna objective functions from train_utils.py
+from train_utils import objective_rf, objective_lr, objective_xgb, objective_svm
+
+# ============================================
+# 0. GLOBALS & REPRODUCIBILITY
+# ============================================
+RANDOM_SEED = 42
+N_TRIALS = 30  # Number of Optuna trials per model
+np.random.seed(RANDOM_SEED)
+
+OUTPUT_DIR = "outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def main():
-    # ---------------------------------------------------------
-    # 1. READ & COMBINE CSV FILES
-    # ---------------------------------------------------------
-    log_message("Reading CSV files (pattern='species*.csv')...")
-    combined_df = read_and_combine_csv(label_prefix="species", pattern="species*.csv")
-    log_message(f"Combined dataset shape: {combined_df.shape}")
+    # ============================================
+    # 1. READING & SUBSAMPLING CSV FILES
+    # ============================================
+    print("Reading CSV files and subsampling...")
 
-    # ---------------------------------------------------------
-    # 2. MAD-BASED FEATURE FILTER
-    # ---------------------------------------------------------
-    log_message("Applying MAD filter (threshold=5)...")
-    final_df, features_to_keep = mad_feature_filter(
-        data=combined_df, label_col="Label", mad_threshold=5
-    )
-    log_message(f"Kept {len(features_to_keep)} features after MAD filter.")
+    csv_files = glob.glob("species*.csv")
+    df_list = []
 
-    # ---------------------------------------------------------
-    # 3. TRAIN/TEST SPLIT + SCALING
-    # ---------------------------------------------------------
-    X = final_df.drop("Label").to_numpy()
-    y = final_df.select("Label").to_numpy().ravel()
+    for file_path in csv_files:
+        temp_df = pd.read_csv(file_path)
+        # Optionally subsample each CSV up to 10,000 rows:
+        # temp_df = temp_df.sample(n=min(len(temp_df), 10_000), random_state=RANDOM_SEED)
+
+        # Create a label from filename, e.g. "species1.csv" -> "1"
+        label = file_path.split('.')[0].replace("species", "")
+        temp_df['Label'] = label
+        df_list.append(temp_df)
+
+    combined_df = pd.concat(df_list, ignore_index=True)
+    print(f"Combined dataset shape: {combined_df.shape}")
+
+    # ============================================
+    # 2. FILTERING FEATURES BASED ON MAD
+    # ============================================
+    print("Filtering numeric features based on MAD...")
+
+    numerical_data = combined_df.select_dtypes(include=[np.number])
+    cv_results = {}
+
+    for col in numerical_data.columns:
+        mean_val = numerical_data[col].mean()
+        std_val = numerical_data[col].std()
+        cv_val = std_val / mean_val if mean_val != 0 else np.nan
+        mad_val = median_abs_deviation(numerical_data[col].values, scale='normal')
+        cv_results[col] = [col, cv_val, mad_val]
+
+    cv_df = pd.DataFrame(cv_results.values(), columns=['Feature', 'CV', 'MAD'])
+
+    MAD_THRESHOLD = 5
+    features_to_keep = cv_df.loc[cv_df["MAD"] >= MAD_THRESHOLD, "Feature"].tolist()
+
+    cols_to_keep = features_to_keep + ["Label"]
+    final_df = combined_df[cols_to_keep].copy()
+    print(f"Number of features kept after MAD filtering: {len(features_to_keep)}")
+
+    # ============================================
+    # 3. FEATURE SCALING & TRAIN/TEST SPLIT
+    # ============================================
+    print("Splitting into train/test and scaling features...")
+
+    X = final_df.drop(columns=["Label"])
+    y = final_df["Label"]
 
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(y)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+        X, y_encoded,
+        test_size=0.2,
+        random_state=RANDOM_SEED,
+        stratify=y_encoded
     )
 
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test  = scaler.transform(X_test)
+    X_train_scaled_cpu = scaler.fit_transform(X_train)
+    X_test_scaled_cpu  = scaler.transform(X_test)
 
-    # Convert to torch tensors
-    X_train_t = torch.tensor(X_train, dtype=torch.float32)
-    y_train_t = torch.tensor(y_train, dtype=torch.long)
-    X_test_t  = torch.tensor(X_test,  dtype=torch.float32)
-    y_test_t  = torch.tensor(y_test,  dtype=torch.long)
+    print("Data split complete.")
+    print(f"Training set shape: {X_train.shape}, Test set shape: {X_test.shape}")
 
-    # ---------------------------------------------------------
-    # 4. HYPERPARAMETER TUNING (OPTUNA)
-    # ---------------------------------------------------------
-    log_message("Starting hyperparameter tuning with Optuna...")
-    # You can define how many epochs are used per trial:
-    num_epochs_tune = 5000  
-    best_params = tune_hyperparameters(
-        X_train_t, y_train_t,
-        n_trials=40,
-        num_epochs_tune=num_epochs_tune
-    )
-    hidden_size   = best_params["hidden_size"]
-    num_layers    = best_params["num_layers"]
-    learning_rate = best_params["learning_rate"]
-    log_message(f"Best hyperparameters found: {best_params}")
+    # Convert arrays to CuPy (GPU) for XGBoost
+    X_train_scaled_gpu = cp.asarray(X_train_scaled_cpu)
+    X_test_scaled_gpu  = cp.asarray(X_test_scaled_cpu)
+    y_train_gpu        = cp.asarray(y_train)
+    y_test_gpu         = cp.asarray(y_test)
 
-    # ---------------------------------------------------------
-    # 5. 5-FOLD CROSS VALIDATION
-    # ---------------------------------------------------------
-    log_message("Performing 5-fold CV with best hyperparams...")
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    num_epochs_cv = 20000
-    fold_train_losses = []
-    fold_val_losses   = []
-    fold_accuracies   = []
-
-    for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
-        X_fold_train, X_fold_val = X_train[tr_idx], X_train[val_idx]
-        y_fold_train, y_fold_val = y_train[tr_idx], y_train[val_idx]
-
-        X_fold_train_t = torch.tensor(X_fold_train, dtype=torch.float32)
-        y_fold_train_t = torch.tensor(y_fold_train, dtype=torch.long)
-        X_fold_val_t   = torch.tensor(X_fold_val,   dtype=torch.float32)
-        y_fold_val_t   = torch.tensor(y_fold_val,   dtype=torch.long)
-
-        guide_cv, train_losses_cv, val_losses_cv = train_pyro_model_with_val(
-            X_fold_train_t, y_fold_train_t,
-            X_fold_val_t,   y_fold_val_t,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            output_dim=len(np.unique(y_train)),
-            learning_rate=learning_rate,
-            num_epochs=num_epochs_cv,
-            verbose=False
-        )
-
-        fold_train_losses.append(train_losses_cv)
-        fold_val_losses.append(val_losses_cv)
-
-        # Predict on validation fold
-        val_preds_fold = predict_pyro_model(
-            X_fold_val_t, guide_cv,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            output_dim=len(np.unique(y_train)),
-            num_samples=300
-        )
-        fold_acc = accuracy_score(y_fold_val_t, val_preds_fold)
-        fold_accuracies.append(fold_acc)
-        log_message(f"[Fold {fold_idx+1}] Accuracy = {fold_acc:.4f}")
-
-    cv_mean_accuracy = np.mean(fold_accuracies)
-    cv_std_accuracy  = np.std(fold_accuracies)
-    log_message(f"CV Accuracy: {cv_mean_accuracy:.4f} ± {cv_std_accuracy:.4f}")
-
-    # Save fold train/val losses for replication
-    cv_fold_losses_path = os.path.join(OUTPUT_FOLDER, "cv_fold_losses.pkl")
-    with open(cv_fold_losses_path, "wb") as f:
-        pickle.dump({"train_losses": fold_train_losses, "val_losses": fold_val_losses}, f)
-    log_message(f"Saved CV fold losses => {cv_fold_losses_path}")
-
-    # Plot all fold train/val losses
-    plt.figure(figsize=(10, 6))
-    for i in range(len(fold_train_losses)):
-        epochs = range(1, len(fold_train_losses[i]) + 1)
-        plt.plot(epochs, fold_train_losses[i], label=f"Train Fold {i+1}")
-        plt.plot(epochs, fold_val_losses[i],   label=f"Val Fold {i+1}")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("All Folds Train & Val Loss Curves")
-    plt.legend(loc="upper right", ncol=2, fontsize="small")
-    plt.grid(True)
-    plt.tight_layout()
-    all_folds_plot = os.path.join(OUTPUT_FOLDER, "cv_folds_loss_trends.png")
-    plt.savefig(all_folds_plot)
-    plt.close()
-
-    # Plot aggregated mean ± std across folds
-    all_train_arr = np.array(fold_train_losses)
-    all_val_arr   = np.array(fold_val_losses)
-    mean_train = all_train_arr.mean(axis=0)
-    std_train  = all_train_arr.std(axis=0)
-    mean_val   = all_val_arr.mean(axis=0)
-    std_val    = all_val_arr.std(axis=0)
-
-    epochs = range(1, all_train_arr.shape[1] + 1)
-    plt.figure(figsize=(10, 6))
-    plt.plot(epochs, mean_train, label="Train Loss (mean)")
-    plt.fill_between(epochs, mean_train - std_train, mean_train + std_train, alpha=0.3)
-    plt.plot(epochs, mean_val, label="Val Loss (mean)")
-    plt.fill_between(epochs, mean_val - std_val, mean_val + std_val, alpha=0.3)
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Aggregated CV Loss (Mean ± Std)")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    agg_folds_plot = os.path.join(OUTPUT_FOLDER, "cv_aggregated_loss.png")
-    plt.savefig(agg_folds_plot)
-    plt.close()
-
-    # ---------------------------------------------------------
-    # 6. FINAL TRAINING ON FULL TRAIN SET + TEST EVAL
-    # ---------------------------------------------------------
-    log_message("Final training on full training data...")
-    num_epochs_final = 20000
-    final_guide, final_train_losses = train_pyro_model(
-        X_train_t, y_train_t,
-        hidden_size=hidden_size,
-        num_layers=num_layers,
-        output_dim=len(np.unique(y_train)),
-        learning_rate=learning_rate,
-        num_epochs=num_epochs_final,
-        verbose=True
-    )
-
-    # Save final training losses
-    final_losses_file = os.path.join(OUTPUT_FOLDER, "final_losses.pkl")
-    with open(final_losses_file, "wb") as f:
-        pickle.dump(final_train_losses, f)
-    log_message(f"Saved final training losses => {final_losses_file}")
-
-    # Plot final training loss
-    epochs_fin = range(1, len(final_train_losses)+1)
-    plt.figure(figsize=(10, 6))
-    plt.plot(epochs_fin, final_train_losses, label='Final Training Loss')
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Final Model Training Loss vs. Epoch")
-    plt.legend()
-    plt.grid(True)
-    final_plot_path = os.path.join(OUTPUT_FOLDER, "final_training_loss.png")
-    plt.savefig(final_plot_path)
-    plt.close()
-    log_message(f"Saved final training loss plot => {final_plot_path}")
-
-    # ---------------------------------------------------------
-    # 7. TEST SET EVALUATION
-    # ---------------------------------------------------------
-    log_message("Predicting on test set with final model...")
-    test_preds = predict_pyro_model(
-        X_test_t,
-        final_guide,
-        hidden_size=hidden_size,
-        num_layers=num_layers,
-        output_dim=len(np.unique(y_train)),
-        num_samples=1000
-    )
-    test_acc = accuracy_score(y_test_t, test_preds)
-    class_rep = classification_report(y_test_t, test_preds, target_names=label_encoder.classes_)
-
-    log_message(f"Test Accuracy = {test_acc:.4f}")
-    log_message("\nClassification Report:\n" + class_rep)
-
-    # ---------------------------------------------------------
-    # 8. SAVE ARTIFACTS
-    # ---------------------------------------------------------
-    # Save general metrics (includes best hyperparams)
-    metrics_dict = {
-        "best_hyperparams": best_params,
-        "cv_mean_accuracy": float(cv_mean_accuracy),
-        "cv_std_accuracy": float(cv_std_accuracy),
-        "test_accuracy": float(test_acc),
-        "classification_report": class_rep
+    # ============================================
+    # 5. RUN OPTUNA STUDIES & TRAIN FINAL MODELS
+    # ============================================
+    model_objectives = {
+        "RandomForest":       (objective_rf,  X_train_scaled_cpu, y_train),
+        "LogisticRegression": (objective_lr,  X_train_scaled_cpu, y_train),
+        "XGBoost":            (objective_xgb, X_train_scaled_gpu, y_train_gpu),
+        "SVM":                (objective_svm, X_train_scaled_cpu, y_train)
     }
-    metrics_path = os.path.join(OUTPUT_FOLDER, "metrics_pyro.json")
-    with open(metrics_path, "w") as f:
-        json.dump(metrics_dict, f, indent=2)
-    log_message(f"Saved metrics => {metrics_path}")
 
-    # NEW: Save best_params to its own file
-    best_params_file = os.path.join(OUTPUT_FOLDER, "best_params.json")
-    with open(best_params_file, "w") as f:
-        json.dump(best_params, f, indent=2)
-    log_message(f"Saved best hyperparams => {best_params_file}")
+    best_models = {}
+    studies = {}
+    best_params_dict = {}
 
-    # Save final Pyro guide
-    guide_state = final_guide.state_dict()
-    guide_params_path = os.path.join(OUTPUT_FOLDER, "bayesian_nn_pyro_params.pkl")
-    with open(guide_params_path, "wb") as f:
-        pickle.dump(guide_state, f)
-    log_message(f"Saved final guide params => {guide_params_path}")
+    for model_name, (obj_func, X_data, y_data) in model_objectives.items():
+        print(f"\n=== {model_name}: Optuna Hyperparameter Tuning ===")
+        study = optuna.create_study(
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED)
+        )
 
-    # Save scaler, label encoder
-    scaler_path = os.path.join(OUTPUT_FOLDER, "scaler.pkl")
-    with open(scaler_path, "wb") as f:
-        pickle.dump(scaler, f)
-    log_message(f"Saved scaler => {scaler_path}")
+        if model_name == "XGBoost":
+            study.optimize(partial(obj_func, X_gpu=X_data, y_gpu=y_data),
+                           n_trials=N_TRIALS, show_progress_bar=True)
+        else:
+            study.optimize(partial(obj_func, X_cpu=X_data, y_cpu=y_data),
+                           n_trials=N_TRIALS, show_progress_bar=True)
 
-    encoder_path = os.path.join(OUTPUT_FOLDER, "label_encoder.pkl")
-    with open(encoder_path, "wb") as f:
-        pickle.dump(label_encoder, f)
-    log_message(f"Saved label encoder => {encoder_path}")
+        print(f"{model_name} best trial:", study.best_trial.params)
+        studies[model_name] = study
+        best_params_dict[model_name] = study.best_trial.params
 
-    # Save features
-    features_path = os.path.join(OUTPUT_FOLDER, "features_to_keep.json")
-    with open(features_path, "w") as f:
-        json.dump(features_to_keep, f, indent=2)
-    log_message(f"Saved features to keep => {features_path}")
+        # Train final model using best params on the FULL training set
+        if model_name == "RandomForest":
+            best_models[model_name] = RandomForestClassifier(
+                n_estimators=study.best_trial.params["n_estimators"],
+                max_depth=study.best_trial.params["max_depth"],
+                random_state=RANDOM_SEED
+            )
+            best_models[model_name].fit(X_train_scaled_cpu, y_train)
 
-    # Save timestamp log
-    log_path = os.path.join(OUTPUT_FOLDER, "log_steps_pyro.json")
-    with open(log_path, "w") as f:
-        json.dump(log_steps, f, indent=2)
-    log_message(f"Saved log => {log_path}")
+        elif model_name == "LogisticRegression":
+            best_models[model_name] = LogisticRegression(
+                C=study.best_trial.params["C"],
+                random_state=RANDOM_SEED,
+                max_iter=2000
+            )
+            best_models[model_name].fit(X_train_scaled_cpu, y_train)
 
-    log_message("All done!")
+        elif model_name == "XGBoost":
+            best_models[model_name] = XGBClassifier(
+                n_estimators=study.best_trial.params["n_estimators"],
+                max_depth=study.best_trial.params["max_depth"],
+                learning_rate=study.best_trial.params["learning_rate"],
+                tree_method="hist",
+                device="cuda",
+                random_state=RANDOM_SEED,
+                eval_metric='mlogloss'
+            )
+            best_models[model_name].fit(X_train_scaled_gpu, y_train_gpu)
+
+        elif model_name == "SVM":
+            kernel = study.best_trial.params["kernel"]
+            gamma  = study.best_trial.params["gamma"] if kernel == "rbf" else "auto"
+            best_models[model_name] = SVC(
+                C=study.best_trial.params["C"],
+                kernel=kernel,
+                gamma=gamma,
+                random_state=RANDOM_SEED
+            )
+            best_models[model_name].fit(X_train_scaled_cpu, y_train)
+
+        # Save each study
+        joblib.dump(study, os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}.pkl"))
+        study.trials_dataframe().to_csv(
+            os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}_trials.csv"),
+            index=False
+        )
+
+    # Save consolidated best hyperparameters
+    params_records = []
+    for m_name, p_dict in best_params_dict.items():
+        row = {"Model": m_name}
+        row.update(p_dict)
+        params_records.append(row)
+    pd.DataFrame(params_records).to_csv(
+        os.path.join(OUTPUT_DIR, "all_best_params.csv"), index=False
+    )
+
+    # ============================================
+    # 6. FINAL EVALUATION & REPORT
+    # ============================================
+    def evaluate_model_classic(model, model_name, X_train_cpu, y_train_cpu, 
+                               X_test_cpu, y_test_cpu, encoder):
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
+        cv_scores = cross_val_score(model, X_train_cpu, y_train_cpu, cv=cv,
+                                    scoring='accuracy', n_jobs=-1)
+
+        print(f"\n--- {model_name} 5-Fold Cross-Validation (CPU) ---")
+        print(f"Fold Accuracies: {cv_scores}")
+        print(f"Mean CV Accuracy: {cv_scores.mean():.4f}, Std Dev: {cv_scores.std():.4f}")
+
+        cv_df = pd.DataFrame({"Fold": range(1, 6), "Accuracy": cv_scores})
+        cv_df.to_csv(
+            os.path.join(OUTPUT_DIR, f"cv_results_{model_name.lower()}.csv"),
+            index=False
+        )
+
+        y_pred = model.predict(X_test_cpu)
+        test_accuracy = accuracy_score(y_test_cpu, y_pred)
+        print(f"\n--- {model_name} Test Set Evaluation (CPU) ---")
+        print(f"Test Accuracy: {test_accuracy:.4f}")
+
+        report_dict = classification_report(
+            y_test_cpu, y_pred,
+            target_names=encoder.classes_,
+            output_dict=True
+        )
+        report_df = pd.DataFrame(report_dict).transpose()
+        print("\nClassification Report:")
+        print(report_df)
+        report_df.to_csv(
+            os.path.join(OUTPUT_DIR, f"classification_report_{model_name.lower()}.csv")
+        )
+
+        cm = confusion_matrix(y_test_cpu, y_pred)
+        cm_norm = confusion_matrix(y_test_cpu, y_pred, normalize='true')
+
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=encoder.classes_)
+        disp.plot(cmap='Blues', values_format='d')
+        plt.title(f"Confusion Matrix ({model_name})")
+        plt.savefig(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}.png"))
+        plt.close()
+
+        plt.figure(figsize=(8,6))
+        sns.heatmap(cm_norm, annot=True, cmap='Blues',
+                    xticklabels=encoder.classes_, yticklabels=encoder.classes_,
+                    fmt=".2f")
+        plt.title(f"Normalized Confusion Matrix ({model_name})")
+        plt.xlabel("Predicted Label")
+        plt.ylabel("True Label")
+        plt.savefig(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized.png"))
+        plt.close()
+
+        pd.DataFrame(cm, index=encoder.classes_, columns=encoder.classes_).to_csv(
+            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_data.csv")
+        )
+        pd.DataFrame(cm_norm, index=encoder.classes_, columns=encoder.classes_).to_csv(
+            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized_data.csv")
+        )
+
+        return {
+            "Model": model_name,
+            "CV_Accuracy_Mean": cv_scores.mean(),
+            "CV_Accuracy_STD": cv_scores.std(),
+            "Test_Accuracy": test_accuracy
+        }
+
+    def evaluate_model_xgb_gpu(model, X_train_gpu, y_train_gpu, 
+                               X_test_gpu, y_test_gpu, encoder, 
+                               model_name="XGBoost"):
+        from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
+        X_train_cpu = cp.asnumpy(X_train_gpu)
+        y_train_cpu = cp.asnumpy(y_train_gpu)
+
+        fold_accuracies = []
+        for train_idx, val_idx in skf.split(X_train_cpu, y_train_cpu):
+            X_tr_fold = X_train_gpu[train_idx]
+            y_tr_fold = y_train_gpu[train_idx]
+            X_val_fold = X_train_gpu[val_idx]
+            y_val_fold = y_train_gpu[val_idx]
+
+            temp_model = XGBClassifier(
+                n_estimators=model.n_estimators,
+                max_depth=model.max_depth,
+                learning_rate=model.learning_rate,
+                tree_method="hist",
+                device="cuda",
+                random_state=RANDOM_SEED,
+                eval_metric='mlogloss'
+            )
+            temp_model.fit(X_tr_fold, y_tr_fold)
+            y_pred_val = temp_model.predict(X_val_fold)
+            acc = accuracy_score(cp.asnumpy(y_val_fold), cp.asnumpy(y_pred_val))
+            fold_accuracies.append(acc)
+
+        cv_mean = np.mean(fold_accuracies)
+        cv_std  = np.std(fold_accuracies)
+
+        print(f"\n--- {model_name} 5-Fold Cross-Validation (GPU) ---")
+        print("Fold Accuracies:", fold_accuracies)
+        print(f"Mean CV Accuracy: {cv_mean:.4f}, Std Dev: {cv_std:.4f}")
+
+        cv_df = pd.DataFrame({"Fold": range(1, 6), "Accuracy": fold_accuracies})
+        cv_df.to_csv(
+            os.path.join(OUTPUT_DIR, f"cv_results_{model_name.lower()}.csv"),
+            index=False
+        )
+
+        y_pred_test = model.predict(X_test_gpu)
+        test_accuracy = accuracy_score(
+            cp.asnumpy(y_test_gpu),
+            cp.asnumpy(y_pred_test)
+        )
+        print(f"\n--- {model_name} Test Set Evaluation (GPU) ---")
+        print(f"Test Accuracy: {test_accuracy:.4f}")
+
+        y_test_cpu = cp.asnumpy(y_test_gpu)
+        y_pred_cpu = cp.asnumpy(y_pred_test)
+
+        report_dict = classification_report(
+            y_test_cpu, y_pred_cpu, target_names=encoder.classes_, output_dict=True
+        )
+        report_df = pd.DataFrame(report_dict).transpose()
+        print("\nClassification Report:")
+        print(report_df)
+        report_df.to_csv(
+            os.path.join(OUTPUT_DIR, f"classification_report_{model_name.lower()}.csv")
+        )
+
+        cm = confusion_matrix(y_test_cpu, y_pred_cpu)
+        cm_norm = confusion_matrix(y_test_cpu, y_pred_cpu, normalize='true')
+
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=encoder.classes_)
+        disp.plot(cmap='Blues', values_format='d')
+        plt.title(f"Confusion Matrix ({model_name})")
+        plt.savefig(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}.png"))
+        plt.close()
+
+        plt.figure(figsize=(8,6))
+        sns.heatmap(cm_norm, annot=True, cmap='Blues',
+                    xticklabels=encoder.classes_, yticklabels=encoder.classes_,
+                    fmt=".2f")
+        plt.title(f"Normalized Confusion Matrix ({model_name})")
+        plt.xlabel("Predicted Label")
+        plt.ylabel("True Label")
+        plt.savefig(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized.png"))
+        plt.close()
+
+        pd.DataFrame(cm, index=encoder.classes_, columns=encoder.classes_).to_csv(
+            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_data.csv")
+        )
+        pd.DataFrame(cm_norm, index=encoder.classes_, columns=encoder.classes_).to_csv(
+            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized_data.csv")
+        )
+
+        return {
+            "Model": model_name,
+            "CV_Accuracy_Mean": cv_mean,
+            "CV_Accuracy_STD": cv_std,
+            "Test_Accuracy": test_accuracy
+        }
+
+    print("\n=== Final Evaluation with 5-Fold Cross-Validation & Test Sets ===")
+    results = []
+
+    for model_name, model in best_models.items():
+        if model_name == "XGBoost":
+            metrics = evaluate_model_xgb_gpu(
+                model=model,
+                X_train_gpu=X_train_scaled_gpu,
+                y_train_gpu=y_train_gpu,
+                X_test_gpu=X_test_scaled_gpu,
+                y_test_gpu=y_test_gpu,
+                encoder=label_encoder,
+                model_name=model_name
+            )
+        else:
+            metrics = evaluate_model_classic(
+                model=model,
+                model_name=model_name,
+                X_train_cpu=X_train_scaled_cpu,
+                y_train_cpu=y_train,
+                X_test_cpu=X_test_scaled_cpu,
+                y_test_cpu=y_test,
+                encoder=label_encoder
+            )
+        results.append(metrics)
+
+    metrics_df = pd.DataFrame(results)
+    print("\n=== Combined Model Metrics ===")
+    print(metrics_df)
+    metrics_df.to_csv(os.path.join(OUTPUT_DIR, "classification_metrics_all_models.csv"), index=False)
+
+    # ============================================
+    # 7. SAVE MODELS & ARTIFACTS
+    # ============================================
+    print("\nSaving trained models and artifacts for replication...")
+    for model_name, model in best_models.items():
+        joblib.dump(model, os.path.join(OUTPUT_DIR, f"best_{model_name.lower()}_model.pkl"))
+
+    joblib.dump(scaler, os.path.join(OUTPUT_DIR, "scaler.pkl"))
+    joblib.dump(label_encoder, os.path.join(OUTPUT_DIR, "label_encoder.pkl"))
+    pd.DataFrame(features_to_keep, columns=["Feature"]).to_csv(
+        os.path.join(OUTPUT_DIR, "features_to_keep.csv"), index=False
+    )
+
+    print("\nAll done! Check the 'outputs' folder for CSV, PKL, and PNG files.")
 
 if __name__ == "__main__":
     main()
