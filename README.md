@@ -209,7 +209,7 @@ Distributed under the  License. See [`LICENSE`](LICENSE) for details.
 
 ## Acknowledgements
 
+We would like to acknowledge
 
 ---
 
-Happy coding!
