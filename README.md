@@ -96,28 +96,11 @@ There are two ways of preparing the data:
 
 2) The events can be exported as channel values in csv format using FlowJo. Place CSV files with the following format (`species1.csv`, `species2.csv`, etc.) in the project directory.
 
-### 2a. Train the Model (main_scripts)
-```bash
-python main.py
-```
-
-**This script:**
-- Preprocesses data and selects features
-- Tunes hyperparameters (GridSearchCV, Optuna)
-- Performs cross-validation
-- Saves artifacts (loss curves, confusion matrix, models, logs)
-- Generates and saves plots
-
-Artifacts generated:
-- `cv_plot_data.npz`
-- `confusion_matrix.npy`
-- `best_model_state.h5`
-- `best_estimator.h5`
-- Plots (`cv_all_folds_loss.png`, `cv_mean_confidence_loss.png`, `confusion_matrix_nn.png`)
-- Log file (`log_steps.json`)
 
 ### 2b. Train the Model (project folder)
 
+Pipelines for training machine learning models on the flow cytometry spectral data.
+
 ```bash
 python main_.py
 python main_.py
@@ -125,7 +108,7 @@ python main_.py
 python main_.py
 ```
 
-**This script:**
+**These scripts:**
 - Preprocesses data and selects features
 - Tunes hyperparameters (Optuna)
 - Performs cross-validation
