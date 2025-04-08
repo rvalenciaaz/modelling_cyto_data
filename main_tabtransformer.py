@@ -57,6 +57,7 @@ final_df = final_pl.to_pandas()
 # otherwise, do it as needed:
 final_df["Label"] = final_df["Label"].str.replace("species", "", regex=False)
 
+#they are all numerical, remove the split into categorical
 # ---------------------------
 # 2.1 IDENTIFY CATEGORICAL VS. NUMERIC COLUMNS
 # ---------------------------
