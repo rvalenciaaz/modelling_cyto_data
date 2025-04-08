@@ -1,8 +1,6 @@
 # main.py
-import glob
 import os
 import joblib
-import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -31,8 +29,13 @@ import cupy as cp
 import optuna
 from functools import partial
 
-# Import Optuna objective functions from train_utils.py
-from train_utils import objective_rf, objective_lr, objective_xgb, objective_svm
+# ---------------------------------------------------------------------
+#  Use the local project "src" modules (similar to reference script)
+# ---------------------------------------------------------------------
+from src.data_utils import read_and_combine_csv
+from src.mad_filter import mad_feature_filter
+# These objective functions should match your local train_utils
+from src.train_utils import objective_rf, objective_lr, objective_xgb, objective_svm
 
 # ============================================
 # 0. GLOBALS & REPRODUCIBILITY
@@ -46,49 +49,25 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def main():
     # ============================================
-    # 1. READING & SUBSAMPLING CSV FILES
+    # 1. READ CSV FILES VIA src.data_utils
     # ============================================
-    print("Reading CSV files and subsampling...")
-
-    csv_files = glob.glob("species*.csv")
-    df_list = []
-
-    for file_path in csv_files:
-        temp_df = pd.read_csv(file_path)
-        # Optionally subsample each CSV up to 10,000 rows:
-        # temp_df = temp_df.sample(n=min(len(temp_df), 10_000), random_state=RANDOM_SEED)
-
-        # Create a label from filename, e.g. "species1.csv" -> "1"
-        label = file_path.split('.')[0].replace("species", "")
-        temp_df['Label'] = label
-        df_list.append(temp_df)
-
-    combined_df = pd.concat(df_list, ignore_index=True)
-    print(f"Combined dataset shape: {combined_df.shape}")
+    print("Reading CSV files (pattern='species*.csv') with src.data_utils...")
+    combined_pl = read_and_combine_csv(label_prefix="species", pattern="species*.csv")
+    print(f"Combined dataset shape (Polars): {combined_pl.shape}")
 
     # ============================================
-    # 2. FILTERING FEATURES BASED ON MAD
+    # 2. MAD-BASED FEATURE FILTER via src.mad_filter
     # ============================================
-    print("Filtering numeric features based on MAD...")
-
-    numerical_data = combined_df.select_dtypes(include=[np.number])
-    cv_results = {}
-
-    for col in numerical_data.columns:
-        mean_val = numerical_data[col].mean()
-        std_val = numerical_data[col].std()
-        cv_val = std_val / mean_val if mean_val != 0 else np.nan
-        mad_val = median_abs_deviation(numerical_data[col].values, scale='normal')
-        cv_results[col] = [col, cv_val, mad_val]
-
-    cv_df = pd.DataFrame(cv_results.values(), columns=['Feature', 'CV', 'MAD'])
-
-    MAD_THRESHOLD = 5
-    features_to_keep = cv_df.loc[cv_df["MAD"] >= MAD_THRESHOLD, "Feature"].tolist()
-
-    cols_to_keep = features_to_keep + ["Label"]
-    final_df = combined_df[cols_to_keep].copy()
+    print("Applying MAD filter (threshold=5) via src.mad_filter...")
+    final_pl, features_to_keep = mad_feature_filter(
+        data=combined_pl, 
+        label_col="Label", 
+        mad_threshold=5
+    )
     print(f"Number of features kept after MAD filtering: {len(features_to_keep)}")
+
+    # Convert the Polars DataFrame to pandas for scikit-learn & RAPIDS usage
+    final_df = final_pl.to_pandas()
 
     # ============================================
     # 3. FEATURE SCALING & TRAIN/TEST SPLIT
@@ -124,7 +103,7 @@ def main():
     y_test_gpu         = cp.asarray(y_test)
 
     # ============================================
-    # 5. RUN OPTUNA STUDIES & TRAIN FINAL MODELS
+    # 4. RUN OPTUNA STUDIES & TRAIN FINAL MODELS
     # ============================================
     model_objectives = {
         "RandomForest":       (objective_rf,  X_train_scaled_cpu, y_train),
@@ -145,11 +124,19 @@ def main():
         )
 
         if model_name == "XGBoost":
-            study.optimize(partial(obj_func, X_gpu=X_data, y_gpu=y_data),
-                           n_trials=N_TRIALS, show_progress_bar=True)
+            # GPU-based objective
+            study.optimize(
+                partial(obj_func, X_gpu=X_data, y_gpu=y_data),
+                n_trials=N_TRIALS, 
+                show_progress_bar=True
+            )
         else:
-            study.optimize(partial(obj_func, X_cpu=X_data, y_cpu=y_data),
-                           n_trials=N_TRIALS, show_progress_bar=True)
+            # CPU-based objective
+            study.optimize(
+                partial(obj_func, X_cpu=X_data, y_cpu=y_data),
+                n_trials=N_TRIALS, 
+                show_progress_bar=True
+            )
 
         print(f"{model_name} best trial:", study.best_trial.params)
         studies[model_name] = study
@@ -195,7 +182,7 @@ def main():
             )
             best_models[model_name].fit(X_train_scaled_cpu, y_train)
 
-        # Save each study
+        # Save each Optuna study
         joblib.dump(study, os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}.pkl"))
         study.trials_dataframe().to_csv(
             os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}_trials.csv"),
@@ -208,12 +195,15 @@ def main():
         row = {"Model": m_name}
         row.update(p_dict)
         params_records.append(row)
+    joblib.dump(params_records, os.path.join(OUTPUT_DIR, "all_best_params.pkl"))
+    # or save as CSV
+    import pandas as pd
     pd.DataFrame(params_records).to_csv(
         os.path.join(OUTPUT_DIR, "all_best_params.csv"), index=False
     )
 
     # ============================================
-    # 6. FINAL EVALUATION & REPORT
+    # 5. FINAL EVALUATION & REPORT
     # ============================================
     def evaluate_model_classic(model, model_name, X_train_cpu, y_train_cpu, 
                                X_test_cpu, y_test_cpu, encoder):
@@ -410,7 +400,7 @@ def main():
     metrics_df.to_csv(os.path.join(OUTPUT_DIR, "classification_metrics_all_models.csv"), index=False)
 
     # ============================================
-    # 7. SAVE MODELS & ARTIFACTS
+    # 6. SAVE MODELS & ARTIFACTS
     # ============================================
     print("\nSaving trained models and artifacts for replication...")
     for model_name, model in best_models.items():
@@ -426,3 +416,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
