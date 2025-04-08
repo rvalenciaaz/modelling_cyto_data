@@ -67,17 +67,25 @@ mamba create -n pytorch python=3.12 scipy numpy matplotlib seaborn pandas polars
 
 ## Project Structure
 
-There are several scripts that execute different pipelines, these are located in the main_scripts folder:
+There are several scripts that execute different pipelines:
 
-- `nn_mlp_optuna_polars.py`: Pipeline for multi-class prediction using a MLP. The hyperparameters are optimised with Optuna, including 
-- `bay_nn_optuna_pyro.py`: Pipeline for multi-class prediction using a Bayesian neural netwrk (MLP). The networks outputs a posterior predictive distribution for each of the classes.
-- ``: Pipeline for
-- ``: Pipeline for
-- ``: Pipeline for
-- ``: Pipeline for
+The main* scripts perform the training of the models
+
+- `.py`: Pipeline for training of a multi-class classifier using a MLP. The hyperparameters are optimised with Optuna, including 
+- `.py`: Pipeline for training of a multi-class classifier using a Bayesian neural network (MLP). The networks outputs a posterior predictive distribution for each of the classes.
+- `.py`: Pipeline for training of a multi-class classifier using classical machine learning models. 
+- `.py`: Pipeline for training of a multi-class classifier using a NN based on the TabTransformer architecture. 
+
 The scripts take the channel values csv from pure culture run in a format (`species1.csv`, `species2.csv`, ...), as it will be specified later.
 
-In addition, these scripts are consolidated into a project located in the folder ``
+To do inference (prediction) on a new dataset, use the inference* scripts:
+
+
+- `.py`: Multi-class prediction using a MLP 
+- `.py`: Multi-class prediction using a Bayesian neural network (MLP). The networks outputs a posterior predictive distribution for each of the classes.
+- `.py`: Multi-class prediction using the classical models (Logistic classification, SVM, Random Forests, xgboost)
+- `.py`: Multi-class prediction using the TabTransformer architecture.
+
 
 ---
 
