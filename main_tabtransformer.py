@@ -1,5 +1,4 @@
 # main.py
-import glob
 import os
 import json
 import datetime
@@ -9,10 +8,17 @@ import optuna
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    ConfusionMatrixDisplay
+)
 import torch
 
-# Import our utilities and model class
+# Local project imports (assuming these are in your "src" folder or similar)
+from src.data_utils import read_and_combine_csv
+from src.mad_filter import mad_feature_filter
 from train_utils import objective
 from model_utils import TabTransformerClassifierWithVal
 
@@ -26,43 +32,30 @@ def log_message(message):
     print(message)
 
 # ---------------------------
-# 1. READ & SUBSAMPLE CSV FILES
+# 1. READ CSV FILES VIA src.data_utils
 # ---------------------------
-log_message("Reading CSV files and subsampling...")
-csv_files = glob.glob("species*.csv")
-df_list = []
-for file_path in csv_files:
-    temp_df = pd.read_csv(file_path)
-    # Optional: subsample (e.g., limit to 10,000 rows)
-    # temp_df = temp_df.sample(n=min(len(temp_df), 10_000), random_state=42)
-    label = file_path.split('.')[0]  # e.g. "species1"
-    temp_df['Label'] = label
-    df_list.append(temp_df)
-
-combined_df = pd.concat(df_list, ignore_index=True)
-combined_df["Label"] = combined_df["Label"].str.replace("species", "", regex=False)
-log_message(f"Combined dataset shape: {combined_df.shape}")
+log_message("Reading CSV files (pattern='species*.csv') via src.data_utils...")
+combined_pl = read_and_combine_csv(label_prefix="species", pattern="species*.csv")
+log_message(f"Combined dataset shape (Polars): {combined_pl.shape}")
 
 # ---------------------------
-# 2. FILTER NUMERIC FEATURES (MAD)
+# 2. APPLY MAD FILTER VIA src.mad_filter
 # ---------------------------
-log_message("Filtering numeric features based on MAD...")
-numerical_data = combined_df.select_dtypes(include=[np.number])
-cv_results = {}
-for col in numerical_data.columns:
-    mean_val = numerical_data[col].mean()
-    std_val = numerical_data[col].std()
-    cv = (std_val / mean_val) * 100 if mean_val != 0 else np.nan
-    from scipy.stats import median_abs_deviation
-    mad = median_abs_deviation(numerical_data[col].values, scale='normal')
-    cv_results[col] = [col, cv, mad]
-
-cv_df = pd.DataFrame(cv_results.values(), columns=['Feature', 'CV', 'MAD'])
-MAD_THRESHOLD = 5
-features_to_keep = cv_df.loc[cv_df["MAD"] >= MAD_THRESHOLD, "Feature"].tolist()
-cols_to_keep = features_to_keep + ["Label"]
-final_df = combined_df[cols_to_keep].copy()
+log_message("Filtering numeric features based on MAD (threshold=5) via src.mad_filter...")
+final_pl, features_to_keep = mad_feature_filter(
+    data=combined_pl, 
+    label_col="Label", 
+    mad_threshold=5
+)
 log_message(f"Number of numeric features kept after MAD filtering: {len(features_to_keep)}")
+
+# Convert Polars to pandas for downstream scikit-learn / TabTransformer
+final_df = final_pl.to_pandas()
+
+# The reference code strips "species" from the label string. 
+# If your `read_and_combine_csv` already sets the label, you might not need this; 
+# otherwise, do it as needed:
+final_df["Label"] = final_df["Label"].str.replace("species", "", regex=False)
 
 # ---------------------------
 # 2.1 IDENTIFY CATEGORICAL VS. NUMERIC COLUMNS
@@ -72,6 +65,7 @@ numeric_cols = []
 for col in final_df.columns:
     if col == "Label":
         continue
+    # Heuristic: treat column as categorical if it's object-dtype or has < 20 unique values
     if final_df[col].dtype == object or final_df[col].nunique() < 20:
         categorical_cols.append(col)
     else:
@@ -95,6 +89,7 @@ for c in categorical_cols:
 X_categ = final_df[categorical_cols].values if len(categorical_cols) > 0 else np.empty((len(final_df), 0))
 X_numeric = final_df[numeric_cols].values if len(numeric_cols) > 0 else np.empty((len(final_df), 0))
 y = final_df["Label"].values
+
 main_label_encoder = LabelEncoder()
 y_encoded = main_label_encoder.fit_transform(y)
 
@@ -106,7 +101,11 @@ X_categ_train, X_categ_test, X_num_train, X_num_test, y_train, y_test = train_te
     X_categ, X_numeric, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
 )
 
+# Combine the two feature arrays for saving, if needed
+X_train = np.hstack([X_categ_train, X_num_train])
+X_test  = np.hstack([X_categ_test,  X_num_test])
 np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
+
 log_message(f"Train set size: {X_categ_train.shape[0]}, Test set size: {X_categ_test.shape[0]}")
 
 # ---------------------------
@@ -171,10 +170,13 @@ for train_index, val_index in kf.split(X_categ_train, y_train):
         epochs=100,
         verbose=False
     )
-    clf_fold.fit(X_cat_tr_fold, X_num_tr_fold, y_tr_fold, X_cat_val_fold, X_num_val_fold, y_val_fold)
+    clf_fold.fit(X_cat_tr_fold, X_num_tr_fold, y_tr_fold,
+                 X_cat_val_fold, X_num_val_fold, y_val_fold)
+
     tr_losses, val_losses = clf_fold.get_train_val_losses()
     fold_train_losses.append(tr_losses)
     fold_val_losses.append(val_losses)
+
     y_val_pred = clf_fold.predict(X_cat_val_fold, X_num_val_fold)
     val_acc = accuracy_score(y_val_fold, y_val_pred)
     fold_val_accuracies.append(val_acc)
@@ -219,7 +221,7 @@ plt.plot(epochs_range, mean_train, label="Mean Train Loss", color='blue')
 plt.fill_between(epochs_range, mean_val - std_val, mean_val + std_val,
                  alpha=0.2, color='orange', label="Val ±1 Std")
 plt.plot(epochs_range, mean_val, label="Mean Val Loss", color='orange')
-plt.title("Mean ± 1 Std Train/Val Loss (5-fold CV, TabTransformer)")
+plt.title("Aggregated 5-Fold CV Loss (Mean ± Std)")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.legend()
@@ -266,6 +268,14 @@ log_message("Saved metrics to 'metrics_tabtransformer.json'.")
 np.save("confusion_matrix_tabtransformer.npy", cm)
 torch.save(final_clf.model_.state_dict(), "tabtransformer_model_state.pth")
 log_message("Saved TabTransformer model's state_dict to 'tabtransformer_model_state.pth'.")
+
+# Save label encoders, main label encoder, and any other artifacts if needed
+# For example:
+# import pickle
+# with open("label_encoders.pkl", "wb") as f:
+#     pickle.dump(label_encoders, f)
+# with open("main_label_encoder.pkl", "wb") as f:
+#     pickle.dump(main_label_encoder, f)
 
 with open("log_steps_tabtransformer.json", "w") as f:
     json.dump(log_steps, f, indent=2)
