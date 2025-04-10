@@ -13,7 +13,7 @@ from cuml.linear_model import LogisticRegression
 from cuml.svm import SVC
 from xgboost import XGBClassifier
 
-from model_utils import TabTransformerClassifierWithVal
+from .model_utils import TabTransformerClassifierWithVal, PyTorchNNClassifierWithVal
 
 from .model_utils import bayesian_nn_model, create_guide, create_svi
 
@@ -160,11 +160,12 @@ def tune_hyperparameters(
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials, timeout=None)
     return study.best_params
-    
+
 def nn_objective(trial, X_train, y_train, n_splits=3):
     """
     Optuna objective for the feedforward PyTorch approach.
     Uses K-Fold to get an average accuracy.
+    - REMOVED the per-fold StandardScaler code.
     """
     hidden_size   = trial.suggest_categorical('hidden_size', [32, 64, 128])
     num_layers    = trial.suggest_int('num_layers', 3, 30)
@@ -173,17 +174,15 @@ def nn_objective(trial, X_train, y_train, n_splits=3):
     batch_size    = trial.suggest_categorical('batch_size', [64, 128, 256])
     epochs        = 20  # fewer epochs for quick search
 
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     accuracy_scores = []
 
     for train_idx, val_idx in kf.split(X_train, y_train):
         X_tr_fold, X_val_fold = X_train[train_idx], X_train[val_idx]
         y_tr_fold, y_val_fold = y_train[train_idx], y_train[val_idx]
 
-        # Scale each fold
-        scaler_fold = StandardScaler()
-        X_tr_fold_scaled = scaler_fold.fit_transform(X_tr_fold)
-        X_val_fold_scaled = scaler_fold.transform(X_val_fold)
+        # No more per-fold scaling here!
+        # We simply pass X_tr_fold and X_val_fold directly to the model.
 
         clf = PyTorchNNClassifierWithVal(
             hidden_size=hidden_size,
@@ -194,10 +193,10 @@ def nn_objective(trial, X_train, y_train, n_splits=3):
             dropout=dropout,
             verbose=False
         )
-        clf.fit(X_tr_fold_scaled, y_tr_fold, X_val_fold_scaled, y_val_fold)
+        clf.fit(X_tr_fold, y_tr_fold, X_val_fold, y_val_fold)
 
-        preds_fold = clf.predict(X_val_fold_scaled)
-        fold_acc = accuracy_score(y_val_fold, preds_fold)
+        preds_fold = clf.predict(X_val_fold)
+        fold_acc   = accuracy_score(y_val_fold, preds_fold)
         accuracy_scores.append(fold_acc)
 
     return np.mean(accuracy_scores)
@@ -326,5 +325,4 @@ def objective(trial, X_categ_train, X_num_train, y_train):
     clf.fit(X_cat_tr, X_num_tr, y_tr, X_cat_val, X_num_val, y_val)
     val_accuracy = clf.score(X_cat_val, X_num_val, y_val)
     return val_accuracy
-
 
