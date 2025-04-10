@@ -1,5 +1,8 @@
+# main.py
+
 import os
 import json
+import datetime
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
@@ -11,24 +14,30 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import torch
 
 # Local imports
-from src.data_utils import read_csv_files, log_message
-from src.mad_filter import filter_by_mad
-from src.train_utils import run_optuna_tuning
+from src.data_utils import read_and_combine_csv
+from src.mad_filter import mad_feature_filter
+from src.train_utils import run_nn_optuna  # now has no scaling inside
 from src.model_utils import PyTorchNNClassifierWithVal
 
 OUTPUT_DIR = "outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+log_steps = []
+def log_message(message: str):
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_steps.append(f"[{now_str}] {message}")
+    print(message)
+
 def main():
     log_steps = []
 
     # 1) Read data
-    combined_df = read_csv_files(pattern="species*.csv", label_prefix="species", log_steps=log_steps)
+    combined_df = read_and_combine_csv(pattern="species*.csv", label_prefix="species")
 
     # 2) MAD filter
-    filtered_df, features_to_keep = filter_by_mad(combined_df, label_col="Label", mad_threshold=5.0)
-    log_message(f"Number of features kept after MAD filter: {len(features_to_keep)}", log_steps=log_steps)
-    #check which ones to move
+    filtered_df, features_to_keep = mad_feature_filter(combined_df, label_col="Label", mad_threshold=5.0)
+    log_message(f"Number of features kept after MAD filter: {len(features_to_keep)}")
+
     # 3) Prepare X, y
     X = filtered_df.drop("Label").to_numpy()
     y = filtered_df["Label"].to_numpy()
@@ -43,33 +52,38 @@ def main():
     )
 
     np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
-    log_message(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}", log_steps=log_steps)
+    log_message(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
-    # 4) Run Optuna Tuning
-    log_message("=== Starting Optuna hyperparameter optimization ===", log_steps=log_steps)
-    best_params, best_score = run_optuna_tuning(X_train, y_train, n_trials=30, n_splits=3)
-    log_message(f"Optuna best params: {best_params}", log_steps=log_steps)
-    log_message(f"Optuna best CV accuracy: {best_score:.4f}", log_steps=log_steps)
+    # -----------------------------------------------------------------------
+    # (NEW) Scale the data right after the split, before run_nn_optuna
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled  = scaler.transform(X_test)
+    # -----------------------------------------------------------------------
 
-    # (NEW) Save best_params to a JSON so we can load them in inference:
+    # 4) Run Optuna Tuning on SCALED data
+    log_message("=== Starting Optuna hyperparameter optimization ===")
+    best_params, best_score = run_nn_optuna(X_train_scaled, y_train, n_trials=30)
+    log_message(f"Optuna best params: {best_params}")
+    log_message(f"Optuna best CV accuracy: {best_score:.4f}")
+
+    # (NEW) Save best_params to JSON
     best_params_path = os.path.join(OUTPUT_DIR, "best_params.json")
     with open(best_params_path, "w") as f:
         json.dump(best_params, f, indent=2)
-    log_message(f"Saved best_params to '{best_params_path}'", log_steps=log_steps)
+    log_message(f"Saved best_params to '{best_params_path}'")
 
     # 5) Final training (refit with best hyperparams)
-    log_message("Re-fitting final model on entire training set...", log_steps=log_steps)
+    log_message("Re-fitting final model on entire training set...")
     final_params = best_params.copy()
-    final_params["epochs"] = 50  # more epochs than used in the quick search
+    final_params["epochs"] = 50  # more epochs
     final_params["verbose"] = True
-
-    # Scale the entire training set
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
 
     # Save scaler & label encoder
     scaler_path = os.path.join(OUTPUT_DIR, "scaler.joblib")
     joblib.dump(scaler, scaler_path)
+    log_message(f"Saved StandardScaler to '{scaler_path}'")
+
     le_path = os.path.join(OUTPUT_DIR, "label_encoder.joblib")
     joblib.dump(label_encoder, le_path)
 
@@ -78,15 +92,14 @@ def main():
     with open(features_path, "w") as f:
         json.dump(features_to_keep, f, indent=2)
 
-    # Train final classifier
+    # Train final classifier on scaled data
     clf = PyTorchNNClassifierWithVal(**final_params)
     clf.fit(X_train_scaled, y_train)
 
-    # Evaluate on test
-    X_test_scaled = scaler.transform(X_test)
+    # Evaluate on test set
     y_pred = clf.predict(X_test_scaled)
     test_acc = accuracy_score(y_test, y_pred)
-    log_message(f"Final Test Accuracy: {test_acc:.4f}", log_steps=log_steps)
+    log_message(f"Final Test Accuracy: {test_acc:.4f}")
 
     # Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
@@ -100,32 +113,32 @@ def main():
 
     # Classification Report
     class_report = classification_report(y_test, y_pred)
-    log_message("\nClassification Report:\n" + class_report, log_steps=log_steps)
+    log_message("\nClassification Report:\n" + class_report)
 
     # Save metrics
     metrics_dict = {
         "test_accuracy": float(test_acc),
         "classification_report": class_report,
         "optuna_best_params": best_params,
-        "optuna_best_cv_score": float(best_score)
+        "optuna_best_cv_score": float(best_score),
     }
     metrics_path = os.path.join(OUTPUT_DIR, "metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(metrics_dict, f, indent=2)
 
-    # Save final model weights
+    # Save final model
     model_path = os.path.join(OUTPUT_DIR, "best_model_state.pth")
     torch.save(clf.model_.state_dict(), model_path)
-    log_message(f"Saved final model state to '{model_path}'.", log_steps=log_steps)
-    log_message(f"Saved metrics to '{metrics_path}'", log_steps=log_steps)
+    log_message(f"Saved final model state to '{model_path}'.")
+    log_message(f"Saved metrics to '{metrics_path}'")
 
     # Save a log of steps
     log_path = os.path.join(OUTPUT_DIR, "log_steps.json")
     with open(log_path, "w") as f:
         json.dump(log_steps, f, indent=2)
-    log_message(f"Saved detailed log with timestamps to '{log_path}'", log_steps=log_steps)
+    log_message(f"Saved detailed log with timestamps to '{log_path}'")
 
-    log_message("All done!", log_steps=log_steps)
+    log_message("All done!")
 
 if __name__ == "__main__":
     main()
