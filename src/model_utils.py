@@ -1,14 +1,19 @@
 import torch
+import torch.nn as nn
+import torch.optim as optim
+
 import pyro
+import pyro.optim                  # for pyro.optim.Adam
 import pyro.distributions as dist
 from pyro.infer import SVI, Trace_ELBO
 import pyro.infer.autoguide as autoguide
 
-import torch.nn as nn
 import numpy as np
 
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.metrics import accuracy_score
 
+# ----- Bayesian Neural Network code -----
 
 def bayesian_nn_model(x, y=None, hidden_size=32, num_layers=2, output_dim=2):
     """
@@ -55,8 +60,6 @@ def bayesian_nn_model(x, y=None, hidden_size=32, num_layers=2, output_dim=2):
     )
 
     logits = hidden @ w_out + b_out
-    # does it return the logits directly?
-    # Create a deterministic node for logits so we can retrieve them in predictions
     pyro.deterministic("logits", logits)
 
     with pyro.plate("data", x.shape[0]):
@@ -74,10 +77,13 @@ def create_svi(model, guide, learning_rate=1e-3):
     """
     Creates an SVI object with Adam optimizer and Trace_ELBO loss.
     """
+    # Use pyro.optim.Adam, which we can now reference after `import pyro.optim`
     optimizer = pyro.optim.Adam({"lr": learning_rate})
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     return svi
-    
+
+# ----- Configurable (non-Bayesian) PyTorch NN code -----
+
 class ConfigurableNN(nn.Module):
     """
     A feedforward network with variable # of layers, hidden size, and optional dropout.
@@ -199,6 +205,8 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
         return self.train_losses_, self.val_losses_
 
 
+# ----- Transformer-based code -----
+
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout=0.1):
         super().__init__()
@@ -286,6 +294,7 @@ class TabTransformer(nn.Module):
                 cat_embeds.append(embed(x_categ[:, i]))
             x_cat = torch.stack(cat_embeds, dim=1)
         else:
+            # If there are no categorical features, use a zero tensor
             x_cat = torch.zeros(batch_size, 1, self.transformer_dim, device=x_categ.device)
 
         cls_token_expanded = self.cls_token.expand(batch_size, -1, -1)
@@ -358,6 +367,7 @@ class TabTransformerClassifierWithVal:
             X_cont_val_t  = X_cont_val_t.to(self.device_)
             y_val_t       = y_val_t.to(self.device_)
 
+        # Determine cardinalities for each categorical column
         if X_categ.shape[1] > 0:
             max_per_column = (X_categ.max(axis=0) + 1).tolist()
             self.categorical_cardinalities_ = [int(m) for m in max_per_column]
@@ -442,9 +452,7 @@ class TabTransformerClassifierWithVal:
 
     def score(self, X_categ, X_cont, y_true):
         preds = self.predict(X_categ, X_cont)
-        from sklearn.metrics import accuracy_score
         return accuracy_score(y_true, preds)
 
     def get_train_val_losses(self):
         return self.train_losses_, self.val_losses_
-
