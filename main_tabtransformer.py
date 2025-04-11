@@ -19,8 +19,8 @@ import polars as pl
 # Local project imports
 from src.data_utils import read_and_combine_csv
 from src.mad_filter import mad_feature_filter
-from train_utils import objective
-from model_utils import TabTransformerClassifierWithVal
+from src.train_utils import objective
+from src.model_utils import TabTransformerClassifierWithVal
 
 # ---------------------------
 # 0. LOGGING UTILITY
