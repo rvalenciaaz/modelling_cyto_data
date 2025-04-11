@@ -5,13 +5,14 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import accuracy_score
 import optuna
 
-import cupy as cp
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.metrics import accuracy_score
 from cuml.ensemble import RandomForestClassifier
 from cuml.linear_model import LogisticRegression
 from cuml.svm import SVC
 from xgboost import XGBClassifier
+
+import cupy as cp
 
 from .model_utils import TabTransformerClassifierWithVal, PyTorchNNClassifierWithVal
 
