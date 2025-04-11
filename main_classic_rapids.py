@@ -1,9 +1,9 @@
-# main.py
 import os
 import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import polars as pl
 
 # sklearn & RAPIDS / XGBoost
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
@@ -34,7 +34,6 @@ from functools import partial
 # ---------------------------------------------------------------------
 from src.data_utils import read_and_combine_csv
 from src.mad_filter import mad_feature_filter
-# These objective functions should match your local train_utils
 from src.train_utils import objective_rf, objective_lr, objective_xgb, objective_svm
 
 # ============================================
@@ -49,7 +48,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def main():
     # ============================================
-    # 1. READ CSV FILES VIA src.data_utils
+    # 1. READ CSV FILES VIA src.data_utils using Polars
     # ============================================
     print("Reading CSV files (pattern='species*.csv') with src.data_utils...")
     combined_pl = read_and_combine_csv(label_prefix="species", pattern="species*.csv")
@@ -66,27 +65,32 @@ def main():
     )
     print(f"Number of features kept after MAD filtering: {len(features_to_keep)}")
 
-    # Convert the Polars DataFrame to pandas for scikit-learn & RAPIDS usage
-    final_df = final_pl.to_pandas()
+    # -------------------------------------------
+    # 3. CONVERT POLARS DATA TO NUMPY ARRAYS
+    # -------------------------------------------
+    # Extract features (all columns except "Label") and label (the "Label" column)
+    X_pl = final_pl.drop("Label")
+    y_pl = final_pl.get_column("Label")
+
+    # Convert to numpy arrays
+    X_np = X_pl.to_numpy()
+    y_np = y_pl.to_numpy()
+
+    # Encode labels using scikit-learn’s LabelEncoder
+    label_encoder = LabelEncoder()
+    y_encoded = label_encoder.fit_transform(y_np)
 
     # ============================================
-    # 3. FEATURE SCALING & TRAIN/TEST SPLIT
+    # 4. FEATURE SCALING & TRAIN/TEST SPLIT (Using NumPy)
     # ============================================
     print("Splitting into train/test and scaling features...")
-
-    X = final_df.drop(columns=["Label"])
-    y = final_df["Label"]
-
-    label_encoder = LabelEncoder()
-    y_encoded = label_encoder.fit_transform(y)
-
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded,
+        X_np, y_encoded,
         test_size=0.2,
         random_state=RANDOM_SEED,
         stratify=y_encoded
     )
-    # After train/test split (and any preprocessing)
+    # Save calibration data with NumPy
     np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
 
     scaler = StandardScaler()
@@ -96,14 +100,14 @@ def main():
     print("Data split complete.")
     print(f"Training set shape: {X_train.shape}, Test set shape: {X_test.shape}")
 
-    # Convert arrays to CuPy (GPU) for XGBoost
+    # Convert arrays to CuPy for GPU-based training
     X_train_scaled_gpu = cp.asarray(X_train_scaled_cpu)
     X_test_scaled_gpu  = cp.asarray(X_test_scaled_cpu)
     y_train_gpu        = cp.asarray(y_train)
     y_test_gpu         = cp.asarray(y_test)
 
     # ============================================
-    # 4. RUN OPTUNA STUDIES & TRAIN FINAL MODELS
+    # 5. RUN OPTUNA STUDIES & TRAIN FINAL MODELS
     # ============================================
     model_objectives = {
         "RandomForest":       (objective_rf,  X_train_scaled_cpu, y_train),
@@ -124,14 +128,12 @@ def main():
         )
 
         if model_name == "XGBoost":
-            # GPU-based objective
             study.optimize(
                 partial(obj_func, X_gpu=X_data, y_gpu=y_data),
                 n_trials=N_TRIALS, 
                 show_progress_bar=True
             )
         else:
-            # CPU-based objective
             study.optimize(
                 partial(obj_func, X_cpu=X_data, y_cpu=y_data),
                 n_trials=N_TRIALS, 
@@ -142,7 +144,7 @@ def main():
         studies[model_name] = study
         best_params_dict[model_name] = study.best_trial.params
 
-        # Train final model using best params on the FULL training set
+        # Train the final model with the best hyperparameters
         if model_name == "RandomForest":
             best_models[model_name] = RandomForestClassifier(
                 n_estimators=study.best_trial.params["n_estimators"],
@@ -182,28 +184,22 @@ def main():
             )
             best_models[model_name].fit(X_train_scaled_cpu, y_train)
 
-        # Save each Optuna study
+        # Save each Optuna study: convert the trials DataFrame (originally pandas) to Polars before writing CSV
+        trials_df = pl.from_pandas(study.trials_dataframe())
+        trials_df.write_csv(os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}_trials.csv"))
         joblib.dump(study, os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}.pkl"))
-        study.trials_dataframe().to_csv(
-            os.path.join(OUTPUT_DIR, f"study_{model_name.lower()}_trials.csv"),
-            index=False
-        )
 
-    # Save consolidated best hyperparameters
+    # Save consolidated best hyperparameters using Polars
     params_records = []
     for m_name, p_dict in best_params_dict.items():
-        row = {"Model": m_name}
-        row.update(p_dict)
-        params_records.append(row)
+        record = {"Model": m_name}
+        record.update(p_dict)
+        params_records.append(record)
+    pl.DataFrame(params_records).write_csv(os.path.join(OUTPUT_DIR, "all_best_params.csv"))
     joblib.dump(params_records, os.path.join(OUTPUT_DIR, "all_best_params.pkl"))
-    # or save as CSV
-    import pandas as pd
-    pd.DataFrame(params_records).to_csv(
-        os.path.join(OUTPUT_DIR, "all_best_params.csv"), index=False
-    )
 
     # ============================================
-    # 5. FINAL EVALUATION & REPORT
+    # 6. FINAL EVALUATION & REPORT (Using Polars for CSV outputs)
     # ============================================
     def evaluate_model_classic(model, model_name, X_train_cpu, y_train_cpu, 
                                X_test_cpu, y_test_cpu, encoder):
@@ -215,11 +211,11 @@ def main():
         print(f"Fold Accuracies: {cv_scores}")
         print(f"Mean CV Accuracy: {cv_scores.mean():.4f}, Std Dev: {cv_scores.std():.4f}")
 
-        cv_df = pd.DataFrame({"Fold": range(1, 6), "Accuracy": cv_scores})
-        cv_df.to_csv(
-            os.path.join(OUTPUT_DIR, f"cv_results_{model_name.lower()}.csv"),
-            index=False
-        )
+        cv_df = pl.DataFrame({
+            "Fold": list(range(1, 6)),
+            "Accuracy": cv_scores.tolist()
+        })
+        cv_df.write_csv(os.path.join(OUTPUT_DIR, f"cv_results_{model_name.lower()}.csv"))
 
         y_pred = model.predict(X_test_cpu)
         test_accuracy = accuracy_score(y_test_cpu, y_pred)
@@ -231,12 +227,12 @@ def main():
             target_names=encoder.classes_,
             output_dict=True
         )
-        report_df = pd.DataFrame(report_dict).transpose()
+        # Convert the nested report dict into a list of records
+        report_records = [{"Label": k, **v} for k, v in report_dict.items()]
+        report_df = pl.DataFrame(report_records)
         print("\nClassification Report:")
         print(report_df)
-        report_df.to_csv(
-            os.path.join(OUTPUT_DIR, f"classification_report_{model_name.lower()}.csv")
-        )
+        report_df.write_csv(os.path.join(OUTPUT_DIR, f"classification_report_{model_name.lower()}.csv"))
 
         cm = confusion_matrix(y_test_cpu, y_pred)
         cm_norm = confusion_matrix(y_test_cpu, y_pred, normalize='true')
@@ -257,12 +253,22 @@ def main():
         plt.savefig(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized.png"))
         plt.close()
 
-        pd.DataFrame(cm, index=encoder.classes_, columns=encoder.classes_).to_csv(
-            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_data.csv")
-        )
-        pd.DataFrame(cm_norm, index=encoder.classes_, columns=encoder.classes_).to_csv(
-            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized_data.csv")
-        )
+        # Build and write confusion matrix data using Polars
+        cm_records = []
+        for true_label, row in zip(encoder.classes_, cm):
+            row_dict = {"True Label": true_label}
+            for pred_label, value in zip(encoder.classes_, row):
+                row_dict[pred_label] = value
+            cm_records.append(row_dict)
+        pl.DataFrame(cm_records).write_csv(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_data.csv"))
+
+        cm_norm_records = []
+        for true_label, row in zip(encoder.classes_, cm_norm):
+            row_dict = {"True Label": true_label}
+            for pred_label, value in zip(encoder.classes_, row):
+                row_dict[pred_label] = value
+            cm_norm_records.append(row_dict)
+        pl.DataFrame(cm_norm_records).write_csv(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized_data.csv"))
 
         return {
             "Model": model_name,
@@ -308,11 +314,11 @@ def main():
         print("Fold Accuracies:", fold_accuracies)
         print(f"Mean CV Accuracy: {cv_mean:.4f}, Std Dev: {cv_std:.4f}")
 
-        cv_df = pd.DataFrame({"Fold": range(1, 6), "Accuracy": fold_accuracies})
-        cv_df.to_csv(
-            os.path.join(OUTPUT_DIR, f"cv_results_{model_name.lower()}.csv"),
-            index=False
-        )
+        cv_df = pl.DataFrame({
+            "Fold": list(range(1, 6)),
+            "Accuracy": fold_accuracies
+        })
+        cv_df.write_csv(os.path.join(OUTPUT_DIR, f"cv_results_{model_name.lower()}.csv"))
 
         y_pred_test = model.predict(X_test_gpu)
         test_accuracy = accuracy_score(
@@ -328,12 +334,11 @@ def main():
         report_dict = classification_report(
             y_test_cpu, y_pred_cpu, target_names=encoder.classes_, output_dict=True
         )
-        report_df = pd.DataFrame(report_dict).transpose()
+        report_records = [{"Label": k, **v} for k, v in report_dict.items()]
+        report_df = pl.DataFrame(report_records)
         print("\nClassification Report:")
         print(report_df)
-        report_df.to_csv(
-            os.path.join(OUTPUT_DIR, f"classification_report_{model_name.lower()}.csv")
-        )
+        report_df.write_csv(os.path.join(OUTPUT_DIR, f"classification_report_{model_name.lower()}.csv"))
 
         cm = confusion_matrix(y_test_cpu, y_pred_cpu)
         cm_norm = confusion_matrix(y_test_cpu, y_pred_cpu, normalize='true')
@@ -354,12 +359,21 @@ def main():
         plt.savefig(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized.png"))
         plt.close()
 
-        pd.DataFrame(cm, index=encoder.classes_, columns=encoder.classes_).to_csv(
-            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_data.csv")
-        )
-        pd.DataFrame(cm_norm, index=encoder.classes_, columns=encoder.classes_).to_csv(
-            os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized_data.csv")
-        )
+        cm_records = []
+        for true_label, row in zip(encoder.classes_, cm):
+            row_dict = {"True Label": true_label}
+            for pred_label, value in zip(encoder.classes_, row):
+                row_dict[pred_label] = value
+            cm_records.append(row_dict)
+        pl.DataFrame(cm_records).write_csv(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_data.csv"))
+
+        cm_norm_records = []
+        for true_label, row in zip(encoder.classes_, cm_norm):
+            row_dict = {"True Label": true_label}
+            for pred_label, value in zip(encoder.classes_, row):
+                row_dict[pred_label] = value
+            cm_norm_records.append(row_dict)
+        pl.DataFrame(cm_norm_records).write_csv(os.path.join(OUTPUT_DIR, f"confusion_matrix_{model_name.lower()}_normalized_data.csv"))
 
         return {
             "Model": model_name,
@@ -394,13 +408,13 @@ def main():
             )
         results.append(metrics)
 
-    metrics_df = pd.DataFrame(results)
+    results_df = pl.DataFrame(results)
     print("\n=== Combined Model Metrics ===")
-    print(metrics_df)
-    metrics_df.to_csv(os.path.join(OUTPUT_DIR, "classification_metrics_all_models.csv"), index=False)
+    print(results_df)
+    results_df.write_csv(os.path.join(OUTPUT_DIR, "classification_metrics_all_models.csv"))
 
     # ============================================
-    # 6. SAVE MODELS & ARTIFACTS
+    # 7. SAVE MODELS & ARTIFACTS
     # ============================================
     print("\nSaving trained models and artifacts for replication...")
     for model_name, model in best_models.items():
@@ -408,9 +422,10 @@ def main():
 
     joblib.dump(scaler, os.path.join(OUTPUT_DIR, "scaler.pkl"))
     joblib.dump(label_encoder, os.path.join(OUTPUT_DIR, "label_encoder.pkl"))
-    pd.DataFrame(features_to_keep, columns=["Feature"]).to_csv(
-        os.path.join(OUTPUT_DIR, "features_to_keep.csv"), index=False
-    )
+    
+    # Save the features kept as a CSV using Polars
+    features_pl = pl.DataFrame({"Feature": features_to_keep})
+    features_pl.write_csv(os.path.join(OUTPUT_DIR, "features_to_keep.csv"))
 
     print("\nAll done! Check the 'outputs' folder for CSV, PKL, and PNG files.")
 
