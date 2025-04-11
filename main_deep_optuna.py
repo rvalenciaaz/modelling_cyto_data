@@ -1,5 +1,3 @@
-# main.py
-
 import os
 import json
 import datetime
@@ -39,7 +37,7 @@ def main():
     log_message(f"Number of features kept after MAD filter: {len(features_to_keep)}")
 
     # 3) Prepare X, y
-    X = filtered_df.drop("Label").to_numpy()
+    X = filtered_df.drop("Label", axis=1).to_numpy()
     y = filtered_df["Label"].to_numpy()
 
     # Label Encode y
@@ -55,13 +53,13 @@ def main():
     log_message(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
     # -----------------------------------------------------------------------
-    # (NEW) Scale the data right after the split, before run_nn_optuna
+    # Scale the data right after the split
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled  = scaler.transform(X_test)
     # -----------------------------------------------------------------------
 
-    # 4) Run Optuna Tuning on SCALED data
+    # 4) Run Optuna Tuning on scaled data
     log_message("=== Starting Optuna hyperparameter optimization ===")
     best_params, best_score = run_nn_optuna(X_train_scaled, y_train, n_trials=30)
     log_message(f"Optuna best params: {best_params}")
@@ -86,6 +84,7 @@ def main():
 
     le_path = os.path.join(OUTPUT_DIR, "label_encoder.joblib")
     joblib.dump(label_encoder, le_path)
+    log_message(f"Saved LabelEncoder to '{le_path}'")
 
     # Save feature list
     features_path = os.path.join(OUTPUT_DIR, "features_used.json")
@@ -96,6 +95,10 @@ def main():
     clf = PyTorchNNClassifierWithVal(**final_params)
     clf.fit(X_train_scaled, y_train)
 
+    # If your PyTorchNNClassifierWithVal stores per-epoch losses:
+    train_loss_history = getattr(clf, "train_loss_history_", [])
+    val_loss_history   = getattr(clf, "val_loss_history_", [])
+
     # Evaluate on test set
     y_pred = clf.predict(X_test_scaled)
     test_acc = accuracy_score(y_test, y_pred)
@@ -103,6 +106,8 @@ def main():
 
     # Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
+
+    # (NEW) Save CM plot
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot(cmap='Blues', values_format='d')
     plt.title("Confusion Matrix (Final NN Model)")
@@ -110,12 +115,52 @@ def main():
     cm_fig_path = os.path.join(OUTPUT_DIR, "confusion_matrix_nn.png")
     plt.savefig(cm_fig_path, bbox_inches='tight')
     plt.close()
+    log_message(f"Saved confusion matrix plot to '{cm_fig_path}'")
+
+    # (NEW) Save the confusion matrix data & label classes for replication
+    # best done in the same metrics.json or in a separate file
+    cm_data_path = os.path.join(OUTPUT_DIR, "cm_data.json")
+    cm_dict = {
+        "confusion_matrix": cm.tolist(),
+        "classes": label_encoder.classes_.tolist(),  # so we know row/column labels
+    }
+    with open(cm_data_path, "w") as f:
+        json.dump(cm_dict, f, indent=2)
+    log_message(f"Saved raw confusion matrix data to '{cm_data_path}'")
 
     # Classification Report
     class_report = classification_report(y_test, y_pred)
     log_message("\nClassification Report:\n" + class_report)
 
-    # Save metrics
+    # Save a plot of training/validation loss vs. epoch (if recorded)
+    if train_loss_history and val_loss_history:
+        loss_fig_path = os.path.join(OUTPUT_DIR, "loss_plot.png")
+        plt.figure()
+        plt.plot(range(1, len(train_loss_history) + 1), train_loss_history, label="Train Loss")
+        plt.plot(range(1, len(val_loss_history) + 1), val_loss_history, label="Validation Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Training and Validation Loss Over Epochs")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(loss_fig_path, bbox_inches='tight')
+        plt.close()
+        log_message(f"Saved loss plot to '{loss_fig_path}'")
+
+        # Also save the loss history to JSON for replication
+        loss_history_path = os.path.join(OUTPUT_DIR, "loss_history.json")
+        with open(loss_history_path, "w") as f:
+            json.dump(
+                {
+                    "train_loss": train_loss_history,
+                    "val_loss": val_loss_history
+                },
+                f,
+                indent=2
+            )
+        log_message(f"Saved loss history to '{loss_history_path}'")
+
+    # Save high-level metrics
     metrics_dict = {
         "test_accuracy": float(test_acc),
         "classification_report": class_report,
@@ -125,12 +170,12 @@ def main():
     metrics_path = os.path.join(OUTPUT_DIR, "metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(metrics_dict, f, indent=2)
+    log_message(f"Saved metrics to '{metrics_path}'")
 
     # Save final model
     model_path = os.path.join(OUTPUT_DIR, "best_model_state.pth")
     torch.save(clf.model_.state_dict(), model_path)
-    log_message(f"Saved final model state to '{model_path}'.")
-    log_message(f"Saved metrics to '{metrics_path}'")
+    log_message(f"Saved final model state to '{model_path}'")
 
     # Save a log of steps
     log_path = os.path.join(OUTPUT_DIR, "log_steps.json")
