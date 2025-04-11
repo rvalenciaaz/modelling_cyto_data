@@ -300,7 +300,7 @@ def objective(trial, X_categ_train, X_num_train, y_train):
     dropout = trial.suggest_float("dropout", 0.1, 0.5)
     mlp_hidden_dim1 = trial.suggest_int("mlp_hidden_dim1", 32, 128, step=32)
     mlp_hidden_dim2 = trial.suggest_int("mlp_hidden_dim2", 16, 64, step=16)
-    learning_rate = trial.suggest_loguniform("learning_rate", 1e-4, 1e-2)
+    learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
 
     mlp_hidden_dims = [mlp_hidden_dim1, mlp_hidden_dim2]
