@@ -249,7 +249,7 @@ np.save("confusion_matrix_tabtransformer.npy", cm)
 torch.save(final_clf.model_.state_dict(), "tabtransformer_model_state.pth")
 log_message("Saved TabTransformer model's state_dict to 'tabtransformer_model_state.pth'.")
 
-#Example of saving label encoder (for y) if needed:
+# Example of saving label encoder (for y) if needed:
 import pickle
 with open("main_label_encoder.pkl", "wb") as f:
     pickle.dump(main_label_encoder, f)
@@ -257,4 +257,18 @@ with open("main_label_encoder.pkl", "wb") as f:
 with open("log_steps_tabtransformer.json", "w") as f:
     json.dump(log_steps, f, indent=2)
 log_message("Saved detailed log to 'log_steps_tabtransformer.json'.")
+
+# ---------------------------
+# 9. SAVE ADDITIONAL ARTIFACTS FOR PLOT REPLICATION
+# ---------------------------
+np.savez("plot_data_artifacts.npz",
+         epochs_range=epochs_range,
+         fold_train_losses_arr=fold_train_losses_arr,
+         fold_val_losses_arr=fold_val_losses_arr,
+         mean_train=mean_train,
+         std_train=std_train,
+         mean_val=mean_val,
+         std_val=std_val)
+log_message("Saved additional plot data to 'plot_data_artifacts.npz'.")
+
 log_message("All done!")
