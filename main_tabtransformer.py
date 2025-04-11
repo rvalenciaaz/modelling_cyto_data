@@ -52,9 +52,6 @@ log_message(f"Number of numeric features kept after MAD filtering: {len(features
 # Convert Polars to pandas
 final_df = final_pl.to_pandas()
 
-# Strip "species" from the label string if needed
-final_df["Label"] = final_df["Label"].str.replace("species", "", regex=False)
-
 # ---------------------------
 # 3. PREPARE FEATURES & LABELS (All Numeric)
 # ---------------------------
