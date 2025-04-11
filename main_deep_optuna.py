@@ -37,7 +37,7 @@ def main():
     log_message(f"Number of features kept after MAD filter: {len(features_to_keep)}")
 
     # 3) Prepare X, y
-    X = filtered_df.drop("Label", axis=1).to_numpy()
+    X = filtered_df.drop("Label").to_numpy()
     y = filtered_df["Label"].to_numpy()
 
     # Label Encode y
