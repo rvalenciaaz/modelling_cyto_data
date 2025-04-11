@@ -3,7 +3,6 @@ import os
 import json
 import datetime
 import numpy as np
-import pandas as pd
 import optuna
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, KFold
@@ -15,6 +14,7 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay
 )
 import torch
+import polars as pl
 
 # Local project imports
 from src.data_utils import read_and_combine_csv
@@ -32,7 +32,7 @@ def log_message(message):
     print(message)
 
 # ---------------------------
-# 1. READ CSV FILES
+# 1. READ CSV FILES (Using Polars)
 # ---------------------------
 log_message("Reading CSV files (pattern='species*.csv') via src.data_utils...")
 combined_pl = read_and_combine_csv(label_prefix="species", pattern="species*.csv")
@@ -49,17 +49,17 @@ final_pl, features_to_keep = mad_feature_filter(
 )
 log_message(f"Number of numeric features kept after MAD filtering: {len(features_to_keep)}")
 
-# Convert Polars to pandas
-final_df = final_pl.to_pandas()
-
 # ---------------------------
-# 3. PREPARE FEATURES & LABELS (All Numeric)
+# 3. PREPARE FEATURES & LABELS (All Numeric) USING POLARS AND NUMPY
 # ---------------------------
-# Drop the label column to get X, and keep the label in y
-X = final_df.drop(columns=["Label"]).values
-y = final_df["Label"].values
+# Instead of converting to pandas, we drop the label column and convert directly to numpy.
+X = final_pl.drop("Label").to_numpy()   # Get all numeric feature columns as a NumPy array.
+y = final_pl["Label"].to_numpy()          # Get the label column as a NumPy array.
+# Ensure a 1D array for labels if needed
+if y.ndim > 1:
+    y = y.flatten()
 
-# Encode the labels (but not the features!)
+# Encode the labels (only the labels; features remain numeric)
 main_label_encoder = LabelEncoder()
 y_encoded = main_label_encoder.fit_transform(y)
 
@@ -73,7 +73,6 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # Optionally save data (e.g., for calibration)
 np.savez("data_for_calibration.npz", X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
-
 log_message(f"Train set size: {X_train.shape[0]}, Test set size: {X_test.shape[0]}")
 
 # ---------------------------
@@ -84,9 +83,8 @@ X_train = scaler.fit_transform(X_train)
 X_test  = scaler.transform(X_test)
 
 # Because the TabTransformerClassifierWithVal expects two separate inputs
-# (X_categ, X_num), and we know everything is numeric, we pass an empty array
-# for X_categ, and our scaled numeric data for X_num.
-X_categ_train = np.empty((X_train.shape[0], 0))  # shape=(n, 0)
+# (X_categ, X_num), and we have only numeric features, we pass empty arrays for categorical data.
+X_categ_train = np.empty((X_train.shape[0], 0))
 X_num_train   = X_train
 X_categ_test  = np.empty((X_test.shape[0], 0))
 X_num_test    = X_test
