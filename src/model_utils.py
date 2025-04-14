@@ -128,7 +128,8 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
     def fit(self, X, y, X_val=None, y_val=None):
         self.input_dim_ = X.shape[1]
         self.output_dim_ = len(np.unique(y))
-
+        self.classes_ = np.unique(y)
+        
         self.model_ = ConfigurableNN(
             input_dim=self.input_dim_,
             hidden_size=self.hidden_size,
