@@ -122,6 +122,7 @@ class PyTorchNNClassifierWithVal(BaseEstimator, ClassifierMixin):
         self.model_ = None
         self.input_dim_ = None
         self.output_dim_ = None
+        self.classes_= None
         self.train_losses_ = []
         self.val_losses_ = []
 
