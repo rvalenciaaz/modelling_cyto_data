@@ -164,7 +164,7 @@ def main_inference():
     )
 
     # 5) Save predictions & probabilities
-    output_csv = "inference_predictions.csv"
+    output_csv = new_data_path[0:-4]+"_inference_predictions.csv"
     with open(output_csv, "w", newline="") as f:
         writer = csv.writer(f)
         # Header
