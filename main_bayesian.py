@@ -12,6 +12,7 @@ import pyro
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import confusion_matrix
 
 # Plotting
 import matplotlib.pyplot as plt
@@ -247,6 +248,37 @@ def main():
 
     log_message(f"Test Accuracy = {test_acc:.4f}")
     log_message("\nClassification Report:\n" + class_rep)
+    
+    # -- After you've done classification_report on y_test_t vs. test_preds --
+    
+    # Compute confusion matrix
+    cm = confusion_matrix(y_test_t, test_preds)
+    
+    # Save confusion matrix array to file (for reproduction in another script)
+    cm_path = os.path.join(OUTPUT_FOLDER, "confusion_matrix.npy")
+    np.save(cm_path, cm)
+    log_message(f"Saved confusion matrix array => {cm_path}")
+    
+    # Plot confusion matrix
+    plt.figure(figsize=(8,6))
+    plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+    plt.title("Test Set Confusion Matrix")
+    plt.colorbar()
+    
+    # Configure tick marks and axis labels
+    tick_marks = np.arange(len(label_encoder.classes_))
+    plt.xticks(tick_marks, label_encoder.classes_, rotation=45)
+    plt.yticks(tick_marks, label_encoder.classes_)
+    plt.tight_layout()
+    plt.ylabel("True label")
+    plt.xlabel("Predicted label")
+    
+    # Save confusion matrix plot
+    cm_plot_path = os.path.join(OUTPUT_FOLDER, "test_confusion_matrix.png")
+    plt.savefig(cm_plot_path)
+    plt.close()
+    log_message(f"Saved confusion matrix plot => {cm_plot_path}")
+
 
     # ---------------------------------------------------------
     # 8. SAVE ARTIFACTS
