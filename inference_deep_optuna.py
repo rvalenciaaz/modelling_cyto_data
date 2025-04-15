@@ -169,7 +169,7 @@ def main_inference():
         writer = csv.writer(f)
         # Header
         header = ["RowIndex", "PredictedClass"] + [
-            f"Prob_Class{i}" for i in range(n_classes)
+            f"Prob_Class{i+1}" for i in range(n_classes)
         ]
         writer.writerow(header)
 
