@@ -5,7 +5,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
-from model_utils import TabTransformerClassifierWithVal
+from src.model_utils import TabTransformerClassifierWithVal
 
 def load_artifacts(artifact_dir="artifacts"):
     """
