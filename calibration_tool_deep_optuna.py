@@ -92,6 +92,7 @@ def rebuild_model(best_params, state_dict, features_to_keep, label_encoder):
     n_classes = len(label_encoder.classes_)
     # adding here
     model.classes_=label_encoder.transform(label_encoder.classes_)
+    
     model.input_dim_ = n_features
     model.output_dim_ = n_classes
 
