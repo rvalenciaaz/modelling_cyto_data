@@ -91,7 +91,7 @@ def predict_pyro_probabilities(
     
     return mean_probs, std_probs, probs_samples
 
-def predict_pyro_probabilities(
+def predict_pyro_logits(
     X_tensor,
     guide,
     hidden_size=32,
